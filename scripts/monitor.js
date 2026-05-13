@@ -234,7 +234,7 @@ function parseList(html, board) {
     if (newPosts.length === 0) {
       console.log('[INFO] 새 글 없음');
 
-      // 원하면 "새 글 없음"도 텔레그램으로 보내고 싶을 때 주석 해제
+      // 새 글 없을 때도 텔레그램으로 상태 메시지를 보내고 싶으면 아래 주석 해제
       /*
       const now = new Date().toISOString();
       const text =
