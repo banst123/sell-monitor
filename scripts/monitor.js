@@ -3,6 +3,7 @@ import https from 'https';
 import fs from 'fs';
 import path from 'path';
 import * as cheerio from 'cheerio';
+import iconv from 'iconv-lite';
 import { fileURLToPath } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -61,6 +62,7 @@ function saveSeenIds(set) {
   }
 }
 
+// bikesell이 EUC-KR로 응답한다고 가정하고 UTF-8로 디코딩
 function httpGet(url) {
   return new Promise((resolve, reject) => {
     const req = https.get(
@@ -75,9 +77,13 @@ function httpGet(url) {
         if (res.statusCode !== 200) {
           return reject(new Error(`HTTP ${res.statusCode} for ${url}`));
         }
-        let data = '';
-        res.on('data', (chunk) => (data += chunk));
-        res.on('end', () => resolve(data));
+        const chunks = [];
+        res.on('data', (chunk) => chunks.push(chunk));
+        res.on('end', () => {
+          const buffer = Buffer.concat(chunks);
+          const decoded = iconv.decode(buffer, 'euc-kr');
+          resolve(decoded);
+        });
       }
     );
     req.on('error', (err) => reject(err));
@@ -124,19 +130,18 @@ function sendTelegramMessage(text) {
   });
 }
 
-// ★ 여기 셀렉터 부분이 실제 HTML과 다를 수 있으니, 필요하면 나중에 미세 조정
+// 목록 HTML 파싱 (임시 셀렉터 + WatchList 필터)
 function parseList(html, board) {
   const $ = cheerio.load(html);
 
   const results = [];
 
-  // 추정: 글 목록이 하나의 table 안에 있고, 각 글이 <tr>로 구성
-  // 번호/제목/작성자/날짜 구조를 가정
   $('table tr').each((_, tr) => {
     const $tr = $(tr);
     const tds = $tr.find('td');
 
-    if (tds.length < 4) return; // 헤더나 이상한 줄은 스킵
+    // 번호 / 제목 / 작성자 / 날짜 등 기본 4칸 이상인 행만 사용
+    if (tds.length < 4) return;
 
     const numText = $(tds[0]).text().trim();
     const titleLink = $(tds[1]).find('a').first();
@@ -144,13 +149,19 @@ function parseList(html, board) {
     const href = titleLink.attr('href') || '';
     const writer = $(tds[2]).text().trim();
 
-    // 번호/제목/링크가 없는 줄은 스킵
+    // 제목이나 링크 없는 행은 스킵
     if (!title || !href) return;
 
-    // 글 고유 ID는 href 전체를 기준으로 사용 (또는 번호)
+    // 관심게시판(WatchList) 링크는 제외
+    if (href.includes('WatchList.asp')) return;
+
+    // 실제 글 링크 패턴(l.asp 또는 content.asp)만 허용
+    if (!href.includes('l.asp') && !href.includes('content.asp')) return;
+
+    // 글 고유 ID (href 전체를 사용, 없으면 번호)
     const id = href.trim() || numText;
 
-    // 상세 링크 절대 경로로 만들기
+    // 상세 링크 절대 경로 만들기
     let url = href;
     if (href.startsWith('/')) {
       url = 'https://www.bikesell.co.kr' + href;
@@ -208,7 +219,7 @@ function parseList(html, board) {
       const text =
         `[${post.board}] 새 글 발견\n` +
         `제목: ${post.title}\n` +
-        `작성자: ${post.writer}\n` +
+        `작성자: ${post.writer || '(미상)'}\n` +
         `링크: ${post.url}`;
 
       try {
