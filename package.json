@@ -1,22 +1,12 @@
 {
-  "name": "chrome-persistent-window-extension",
+  "name": "sell-monitor",
   "version": "1.0.0",
-  "description": "A Chrome extension that opens a persistent window.",
-  "main": "src/background.ts",
+  "private": true,
+  "type": "module",
   "scripts": {
-    "build": "tsc",
-    "watch": "tsc -w",
-    "start": "npm run build && chrome.exe --load-extension=./"
+    "start": "node scripts/monitor.js"
   },
-  "keywords": [
-    "chrome",
-    "extension",
-    "persistent",
-    "window"
-  ],
-  "author": "Your Name",
-  "license": "MIT",
-  "devDependencies": {
-    "typescript": "^4.0.0"
+  "dependencies": {
+    "cheerio": "^1.0.0-rc.12"
   }
 }
