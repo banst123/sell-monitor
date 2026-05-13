@@ -1,4 +1,6 @@
 // scripts/monitor.js
+import dotenv from 'dotenv';
+dotenv.config();// scripts/monitor.js
 import https from 'https';
 import fs from 'fs';
 import path from 'path';
@@ -130,59 +132,60 @@ function sendTelegramMessage(text) {
   });
 }
 
-// 목록 HTML 파싱 (BIKESELL dt/dd 구조 기준)
+// 목록 HTML 파싱 (BIKESELL 실제 리스트 구조 기준)
 function parseList(html, board) {
   const $ = cheerio.load(html);
   const results = [];
 
-  // 글 목록 영역에서 dt와 dd가 번갈아 나오는 구조를 가정
-  const dts = $('dt'); // 제목/링크/댓글수
-  const dds = $('dd'); // 조회수/작성자/날짜
-
-  dts.each((index, dt) => {
-    const $dt = $(dt);
-    const $dd = $(dds[index]); // 같은 인덱스의 dd를 매칭
-
-    if (!$dd || $dd.length === 0) return;
-
-    // 제목 및 링크
-    const titleLink = $dt.find('a').first();
-    const titleRaw = titleLink.text().trim(); // 예: "XXX ...[ 0 ]"
-    const href = titleLink.attr('href') || '';
+  // content.asp로 가는 글 제목 링크만 대상으로
+  $('a[href*="content.asp"]').each((_, a) => {
+    const $a = $(a);
+    const href = $a.attr('href') || '';
+    let titleRaw = $a.text().trim();
 
     if (!href || !titleRaw) return;
 
-    // 제목에서 댓글수 [0] 부분 제거
-    const title = titleRaw.replace(/\[\s*\d+\s*\]\s*$/, '').trim();
+    // 관심게시판(WatchList) 등은 제외
+    if (href.includes('WatchList.asp')) return;
 
-    // dd 안의 텍스트에서 조회수 / 작성자 / 날짜 추출
-    // 예: "1053\nuilim45\n2026-05-13"
-    const ddTextLines = $dd
-      .text()
-      .split('\n')
-      .map((s) => s.trim())
-      .filter((s) => s.length > 0);
+    // 제목에서 댓글수 [0] 꼬리 제거 (만약 a 안에 붙어 있다면)
+    titleRaw = titleRaw.replace(/\[\s*\d+\s*\]\s*$/, '').trim();
+
+    // a 태그 뒤에 이어진 텍스트/태그에서 조회수 / 작성자 / 날짜 추출
+    // 예: "[ 0 ]4[Khc1211]2026-05-14"
+    let tail = '';
+    let node = a.nextSibling;
+
+    while (node) {
+      if (node.type === 'text') {
+        tail += node.data;
+      } else if (node.type === 'tag') {
+        tail += $(node).text();
+      }
+      if (tail.length > 100) break;
+      node = node.nextSibling;
+    }
+
+    tail = tail.replace(/\s+/g, ' ').trim();
+
+    // 댓글수 [숫자] 제거
+    tail = tail.replace(/\[\s*\d+\s*\]/, '').trim();
+
+    // 조회수(숫자) + 작성자(문자열) + 날짜(YYYY-MM-DD)
+    const m = tail.match(/^(\d+)\s*([^\d]+?)\s*(\d{4}-\d{2}-\d{2})$/);
 
     let views = '';
     let writer = '';
     let date = '';
 
-    if (ddTextLines.length >= 3) {
-      views = ddTextLines[0];  // 조회수
-      writer = ddTextLines[1]; // 작성자ID
-      date = ddTextLines[2];   // 날짜
+    if (m) {
+      views = m[1].trim();
+      writer = m[2].trim();
+      date = m[3].trim();
     }
 
-    // 관심게시판(WatchList) 링크는 제외
-    if (href.includes('WatchList.asp')) return;
-
-    // 실제 글 링크 패턴(l.asp 또는 content.asp)만 허용
-    if (!href.includes('l.asp') && !href.includes('content.asp')) return;
-
-    // 글 고유 ID로 href 전체를 사용
     const id = href.trim();
 
-    // 상세 링크 절대 경로 만들기
     let url = href;
     if (href.startsWith('/')) {
       url = 'https://www.bikesell.co.kr' + href;
@@ -193,7 +196,7 @@ function parseList(html, board) {
     results.push({
       id,
       board: board.name,
-      title,
+      title: titleRaw,
       writer,
       url,
       views,
@@ -233,24 +236,6 @@ function parseList(html, board) {
 
     if (newPosts.length === 0) {
       console.log('[INFO] 새 글 없음');
-
-      // 새 글 없을 때도 텔레그램으로 상태 메시지를 보내고 싶으면 아래 주석 해제
-      /*
-      const now = new Date().toISOString();
-      const text =
-        `BikeSell 모니터링 결과\n` +
-        `시간: ${now}\n` +
-        `대상 게시판: ${BOARDS.map((b) => b.name).join(', ')}\n` +
-        `새 글: 없음`;
-
-      try {
-        await sendTelegramMessage(text);
-        console.log('[OK] 새 글 없음 메시지 전송');
-      } catch (e) {
-        console.error('[ERROR] 새 글 없음 메시지 전송 실패:', e.message);
-      }
-      */
-
       return;
     }
 
