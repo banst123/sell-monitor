@@ -130,27 +130,48 @@ function sendTelegramMessage(text) {
   });
 }
 
-// 목록 HTML 파싱 (임시 셀렉터 + WatchList 필터)
+// 목록 HTML 파싱 (BIKESELL dt/dd 구조 기준)
 function parseList(html, board) {
   const $ = cheerio.load(html);
-
   const results = [];
 
-  $('table tr').each((_, tr) => {
-    const $tr = $(tr);
-    const tds = $tr.find('td');
+  // 글 목록 영역에서 dt와 dd가 번갈아 나오는 구조를 가정
+  const dts = $('dt'); // 제목/링크/댓글수
+  const dds = $('dd'); // 조회수/작성자/날짜
 
-    // 번호 / 제목 / 작성자 / 날짜 등 기본 4칸 이상인 행만 사용
-    if (tds.length < 4) return;
+  dts.each((index, dt) => {
+    const $dt = $(dt);
+    const $dd = $(dds[index]); // 같은 인덱스의 dd를 매칭
 
-    const numText = $(tds[0]).text().trim();
-    const titleLink = $(tds[1]).find('a').first();
-    const title = titleLink.text().trim();
+    if (!$dd || $dd.length === 0) return;
+
+    // 제목 및 링크
+    const titleLink = $dt.find('a').first();
+    const titleRaw = titleLink.text().trim(); // 예: "XXX ...[ 0 ]"
     const href = titleLink.attr('href') || '';
-    const writer = $(tds[2]).text().trim();
 
-    // 제목이나 링크 없는 행은 스킵
-    if (!title || !href) return;
+    if (!href || !titleRaw) return;
+
+    // 제목에서 댓글수 [0] 부분 제거
+    const title = titleRaw.replace(/\[\s*\d+\s*\]\s*$/, '').trim();
+
+    // dd 안의 텍스트에서 조회수 / 작성자 / 날짜 추출
+    // 예: "1053\nuilim45\n2026-05-13"
+    const ddTextLines = $dd
+      .text()
+      .split('\n')
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0);
+
+    let views = '';
+    let writer = '';
+    let date = '';
+
+    if (ddTextLines.length >= 3) {
+      views = ddTextLines[0];  // 조회수
+      writer = ddTextLines[1]; // 작성자ID
+      date = ddTextLines[2];   // 날짜
+    }
 
     // 관심게시판(WatchList) 링크는 제외
     if (href.includes('WatchList.asp')) return;
@@ -158,8 +179,8 @@ function parseList(html, board) {
     // 실제 글 링크 패턴(l.asp 또는 content.asp)만 허용
     if (!href.includes('l.asp') && !href.includes('content.asp')) return;
 
-    // 글 고유 ID (href 전체를 사용, 없으면 번호)
-    const id = href.trim() || numText;
+    // 글 고유 ID로 href 전체를 사용
+    const id = href.trim();
 
     // 상세 링크 절대 경로 만들기
     let url = href;
@@ -175,6 +196,8 @@ function parseList(html, board) {
       title,
       writer,
       url,
+      views,
+      date,
     });
   });
 
@@ -210,6 +233,24 @@ function parseList(html, board) {
 
     if (newPosts.length === 0) {
       console.log('[INFO] 새 글 없음');
+
+      // 원하면 "새 글 없음"도 텔레그램으로 보내고 싶을 때 주석 해제
+      /*
+      const now = new Date().toISOString();
+      const text =
+        `BikeSell 모니터링 결과\n` +
+        `시간: ${now}\n` +
+        `대상 게시판: ${BOARDS.map((b) => b.name).join(', ')}\n` +
+        `새 글: 없음`;
+
+      try {
+        await sendTelegramMessage(text);
+        console.log('[OK] 새 글 없음 메시지 전송');
+      } catch (e) {
+        console.error('[ERROR] 새 글 없음 메시지 전송 실패:', e.message);
+      }
+      */
+
       return;
     }
 
