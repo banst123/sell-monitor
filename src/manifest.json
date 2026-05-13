@@ -1,0 +1,32 @@
+{
+  "manifest_version": 3,
+  "name": "Persistent Window Extension",
+  "version": "1.0",
+  "description": "A Chrome extension that opens a persistent window.",
+  "permissions": [
+    "storage",
+    "tabs"
+  ],
+  "background": {
+    "service_worker": "background.ts"
+  },
+  "action": {
+    "default_popup": "window.html",
+    "default_icon": {
+      "16": "icon16.png",
+      "48": "icon48.png",
+      "128": "icon128.png"
+    }
+  },
+  "icons": {
+    "16": "icon16.png",
+    "48": "icon48.png",
+    "128": "icon128.png"
+  },
+  "web_accessible_resources": [
+    {
+      "resources": ["window.html", "styles/window.css"],
+      "matches": ["<all_urls>"]
+    }
+  ]
+}

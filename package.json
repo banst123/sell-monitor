@@ -1,0 +1,22 @@
+{
+  "name": "chrome-persistent-window-extension",
+  "version": "1.0.0",
+  "description": "A Chrome extension that opens a persistent window.",
+  "main": "src/background.ts",
+  "scripts": {
+    "build": "tsc",
+    "watch": "tsc -w",
+    "start": "npm run build && chrome.exe --load-extension=./"
+  },
+  "keywords": [
+    "chrome",
+    "extension",
+    "persistent",
+    "window"
+  ],
+  "author": "Your Name",
+  "license": "MIT",
+  "devDependencies": {
+    "typescript": "^4.0.0"
+  }
+}
