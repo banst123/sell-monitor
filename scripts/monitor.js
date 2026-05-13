@@ -1,6 +1,7 @@
 // scripts/monitor.js
-import dotenv from 'dotenv';
-dotenv.config();// scripts/monitor.js
+import * as dotenv from 'dotenv';
+dotenv.config();
+
 import https from 'https';
 import fs from 'fs';
 import path from 'path';
@@ -132,77 +133,83 @@ function sendTelegramMessage(text) {
   });
 }
 
-// 목록 HTML 파싱 (BIKESELL 실제 리스트 구조 기준)
+// 목록 HTML 파싱 (텍스트 라인 기반: 제목/조회수/작성자/날짜)
 function parseList(html, board) {
   const $ = cheerio.load(html);
+
+  // 리스트 영역만 대략 좁혀서 텍스트 추출 (필요시 셀렉터 조정)
+  const listText = $('body').text(); // 우선 전체에서 시작
+  const rawLines = listText
+    .split('\n')
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+
   const results = [];
 
-  // content.asp로 가는 글 제목 링크만 대상으로
-  $('a[href*="content.asp"]').each((_, a) => {
-    const $a = $(a);
-    const href = $a.attr('href') || '';
-    let titleRaw = $a.text().trim();
+  for (let i = 0; i < rawLines.length; i++) {
+    const line = rawLines[i];
 
-    if (!href || !titleRaw) return;
+    // 제목 후보: 끝에 [ 숫자 ]가 붙은 라인
+    // 예: "DT XRC1501 ...[ 0 ]"
+    const titleMatch = line.match(/(.+)\[\s*\d+\s*\]$/);
+    if (!titleMatch) continue;
 
-    // 관심게시판(WatchList) 등은 제외
-    if (href.includes('WatchList.asp')) return;
+    const title = titleMatch[1].trim();
 
-    // 제목에서 댓글수 [0] 꼬리 제거 (만약 a 안에 붙어 있다면)
-    titleRaw = titleRaw.replace(/\[\s*\d+\s*\]\s*$/, '').trim();
+    // 그 다음 줄 3개가 각각 조회수, 작성자, 날짜라고 가정
+    const viewsLine = rawLines[i + 1] || '';
+    const writerLine = rawLines[i + 2] || '';
+    const dateLine = rawLines[i + 3] || '';
 
-    // a 태그 뒤에 이어진 텍스트/태그에서 조회수 / 작성자 / 날짜 추출
-    // 예: "[ 0 ]4[Khc1211]2026-05-14"
-    let tail = '';
-    let node = a.nextSibling;
+    // 조회수 = 숫자
+    const viewsMatch = viewsLine.match(/^(\d+)$/);
+    const views = viewsMatch ? viewsMatch[1] : '';
 
-    while (node) {
-      if (node.type === 'text') {
-        tail += node.data;
-      } else if (node.type === 'tag') {
-        tail += $(node).text();
+    // 작성자 = 공백 없는 한 덩어리 (한글/영문/숫자)
+    const writerMatch = writerLine.match(/^([\w가-힣]+)$/);
+    const writer = writerMatch ? writerMatch[1] : '';
+
+    // 날짜 = YYYY-MM-DD
+    const dateMatch = dateLine.match(/^(\d{4}-\d{2}-\d{2})$/);
+    const date = dateMatch ? dateMatch[1] : '';
+
+    // 최소한 조회수/작성자/날짜가 모두 형태를 만족할 때만 유효 글로 인정
+    if (!views || !writer || !date) continue;
+
+    // 제목에 해당하는 a[href*="content.asp"] 링크 찾기
+    // 제목 텍스트가 줄바꿈 등으로 조금 달라질 수 있으니, 포함 관계로 느슨하게 매칭
+    let href = '';
+    $('a[href*="content.asp"]').each((_, a) => {
+      const text = $(a).text().replace(/\s+/g, ' ').trim();
+      if (!text) return;
+      if (title.includes(text) || text.includes(title)) {
+        href = $(a).attr('href') || '';
+        return false; // break
       }
-      if (tail.length > 100) break;
-      node = node.nextSibling;
-    }
+    });
 
-    tail = tail.replace(/\s+/g, ' ').trim();
-
-    // 댓글수 [숫자] 제거
-    tail = tail.replace(/\[\s*\d+\s*\]/, '').trim();
-
-    // 조회수(숫자) + 작성자(문자열) + 날짜(YYYY-MM-DD)
-    const m = tail.match(/^(\d+)\s*([^\d]+?)\s*(\d{4}-\d{2}-\d{2})$/);
-
-    let views = '';
-    let writer = '';
-    let date = '';
-
-    if (m) {
-      views = m[1].trim();
-      writer = m[2].trim();
-      date = m[3].trim();
-    }
+    if (!href) continue;
+    if (href.includes('WatchList.asp')) continue;
 
     const id = href.trim();
 
-    let url = href;
-    if (href.startsWith('/')) {
-      url = 'https://www.bikesell.co.kr' + href;
-    } else if (!href.startsWith('http')) {
-      url = 'https://www.bikesell.co.kr/' + href.replace(/^\//, '');
+    let url;
+    try {
+      url = new URL(href, 'https://www.bikesell.co.kr/site/board/').toString();
+    } catch {
+      url = 'https://www.bikesell.co.kr';
     }
 
     results.push({
       id,
       board: board.name,
-      title: titleRaw,
+      title,
       writer,
       url,
       views,
       date,
     });
-  });
+  }
 
   return results;
 }
@@ -250,7 +257,7 @@ function parseList(html, board) {
 
       try {
         await sendTelegramMessage(text);
-        console.log('[OK] 메시지 전송:', post.title);
+        console.log('[OK] 메시지 전송:', post.title, '/', post.writer || '(미상)');
       } catch (e) {
         console.error('[ERROR] 메시지 전송 실패:', e.message);
       }
