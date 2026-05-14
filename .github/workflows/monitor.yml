@@ -11,6 +11,13 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Restore seen posts cache
+        id: cache-seen-restore
+        uses: actions/cache/restore@v4
+        with:
+          path: seen_posts.json
+          key: sell-monitor-seen-v1
+
       - name: Use Node.js
         uses: actions/setup-node@v4
         with:
@@ -24,3 +31,10 @@ jobs:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: node scripts/monitor.js
+
+      - name: Save seen posts cache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: seen_posts.json
+          key: sell-monitor-seen-v1
