@@ -12,7 +12,6 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Cache seen posts
-        id: cache-seen
         uses: actions/cache@v4
         with:
           path: seen_posts.json
