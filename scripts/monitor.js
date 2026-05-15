@@ -152,7 +152,7 @@ function parseList(html, board) {
   const listText = $('body').text();
 
   const rawLines = listText
-    .split('/n')
+    .split('\n')
     .map((s) => s.trim())
     .filter((s) => s.length > 0);
 
@@ -160,7 +160,7 @@ function parseList(html, board) {
 
   for (let i = 0; i < rawLines.length; i++) {
     const line = rawLines[i];
-    const titleMatch = line.match(/(.+)[s*d+s*]$/);
+    const titleMatch = line.match(/(.+)\[\s*\d+\s*\]$/);
     if (!titleMatch) continue;
 
     const title = titleMatch[1].trim();
@@ -168,20 +168,20 @@ function parseList(html, board) {
     const writerLine = rawLines[i + 2] || '';
     const dateLine = rawLines[i + 3] || '';
 
-    const viewsMatch = viewsLine.match(/^(d+)$/);
+    const viewsMatch = viewsLine.match(/^(\d+)$/);
     const views = viewsMatch ? viewsMatch[1] : '';
 
-    const writerMatch = writerLine.match(/^([w가-힣]+)$/);
+    const writerMatch = writerLine.match(/^([\w가-힣]+)$/);
     const writer = writerMatch ? writerMatch[1] : '';
 
-    const dateMatch = dateLine.match(/^(d{4}-d{2}-d{2})$/);
+    const dateMatch = dateLine.match(/^(\d{4}-\d{2}-\d{2})$/);
     const date = dateMatch ? dateMatch[1] : '';
 
     if (!views || !writer || !date) continue;
 
     let href = '';
     $('a[href*="content.asp"]').each((_, a) => {
-      const text = $(a).text().replace(/s+/g, ' ').trim();
+      const text = $(a).text().replace(/\s+/g, ' ').trim();
       if (!text) return;
       if (title.includes(text) || text.includes(title)) {
         href = $(a).attr('href') || '';
@@ -252,12 +252,9 @@ function parseList(html, board) {
 
     for (const post of newPosts) {
       const text =
-        `[${post.board}] 새 글 발견
-` +
-        `제목: ${post.title}
-` +
-        `작성자: ${post.writer || '(미상)'}
-` +
+        `[${post.board}] 새 글 발견\n` +
+        `제목: ${post.title}\n` +
+        `작성자: ${post.writer || '(미상)'}\n` +
         `모바일 보기: ${post.mobileUrl}`;
 
       try {
