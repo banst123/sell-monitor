@@ -3,6 +3,10 @@ name: Sell Monitor Test
 on:
   workflow_dispatch:  # 외부에서 API로 호출할 때 쓰는 트리거
 
+concurrency:
+  group: sell-monitor
+  cancel-in-progress: false
+
 jobs:
   monitor:
     runs-on: ubuntu-latest
