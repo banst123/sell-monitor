@@ -1,4 +1,3 @@
-// scripts/monitor.js
 import * as dotenv from 'dotenv';
 dotenv.config();
 
@@ -20,27 +19,29 @@ if (!TOKEN || !CHAT_ID) {
   process.exit(1);
 }
 
-// 모니터링할 게시판들
 const BOARDS = [
   {
     name: '산악완성차 중고장터',
     url: 'https://bikesell.co.kr/site/board/list.asp?doltop=MARKET&dolsection=MARKET1',
+    mobileUrl: 'https://bikesell.co.kr/site/m/list.asp?doltop=MARKET&dolsection=MARKET1',
   },
   {
     name: '산악프레임 중고장터',
     url: 'https://bikesell.co.kr/site/board/list.asp?doltop=MARKET&dolsection=MARKET2',
+    mobileUrl: 'https://bikesell.co.kr/site/m/list.asp?doltop=MARKET&dolsection=MARKET2',
   },
   {
     name: '산악 샥포크 중고장터',
     url: 'https://bikesell.co.kr/site/board/list.asp?doltop=MARKET&dolsection=MARKET3',
+    mobileUrl: 'https://bikesell.co.kr/site/m/list.asp?doltop=MARKET&dolsection=MARKET3',
   },
   {
     name: '산악부속 중고장터',
     url: 'https://bikesell.co.kr/site/board/list.asp?doltop=MARKET&dolsection=MARKET4',
+    mobileUrl: 'https://bikesell.co.kr/site/m/list.asp?doltop=MARKET&dolsection=MARKET4',
   },
 ];
 
-// 이미 본 글 ID 저장 파일
 const SEEN_FILE = path.join(__dirname, '..', 'seen_posts.json');
 
 function loadSeenIds() {
@@ -65,7 +66,6 @@ function saveSeenIds(set) {
   }
 }
 
-// bikesell이 EUC-KR로 응답한다고 가정하고 UTF-8로 디코딩
 function httpGet(url) {
   return new Promise((resolve, reject) => {
     const req = https.get(
@@ -98,6 +98,7 @@ function sendTelegramMessage(text) {
     const payload = JSON.stringify({
       chat_id: CHAT_ID,
       text,
+      disable_web_page_preview: false,
     });
 
     const options = {
@@ -133,14 +134,26 @@ function sendTelegramMessage(text) {
   });
 }
 
-// 목록 HTML 파싱 (텍스트 라인 기반: 제목/조회수/작성자/날짜)
+function normalizeId(href) {
+  try {
+    const u = new URL(href, 'https://www.bikesell.co.kr');
+    u.hash = '';
+    u.searchParams.delete('Search');
+    u.searchParams.delete('SearchText');
+    u.searchParams.delete('Page');
+    u.searchParams.delete('Gotopage');
+    return u.pathname + '?' + u.searchParams.toString();
+  } catch {
+    return href.trim();
+  }
+}
+
 function parseList(html, board) {
   const $ = cheerio.load(html);
-
-  // 리스트 영역만 대략 좁혀서 텍스트 추출 (필요시 셀렉터 조정)
-  const listText = $('body').text(); // 우선 전체에서 시작
+  const listText = $('body').text();
   const rawLines = listText
-    .split('\n')
+    .split('
+')
     .map((s) => s.trim())
     .filter((s) => s.length > 0);
 
@@ -148,50 +161,39 @@ function parseList(html, board) {
 
   for (let i = 0; i < rawLines.length; i++) {
     const line = rawLines[i];
-
-    // 제목 후보: 끝에 [ 숫자 ]가 붙은 라인
-    // 예: "DT XRC1501 ...[ 0 ]"
-    const titleMatch = line.match(/(.+)\[\s*\d+\s*\]$/);
+    const titleMatch = line.match(/(.+)[s*d+s*]$/);
     if (!titleMatch) continue;
 
     const title = titleMatch[1].trim();
-
-    // 그 다음 줄 3개가 각각 조회수, 작성자, 날짜라고 가정
     const viewsLine = rawLines[i + 1] || '';
     const writerLine = rawLines[i + 2] || '';
     const dateLine = rawLines[i + 3] || '';
 
-    // 조회수 = 숫자
-    const viewsMatch = viewsLine.match(/^(\d+)$/);
+    const viewsMatch = viewsLine.match(/^(d+)$/);
     const views = viewsMatch ? viewsMatch[1] : '';
 
-    // 작성자 = 공백 없는 한 덩어리 (한글/영문/숫자)
-    const writerMatch = writerLine.match(/^([\w가-힣]+)$/);
+    const writerMatch = writerLine.match(/^([w가-힣]+)$/);
     const writer = writerMatch ? writerMatch[1] : '';
 
-    // 날짜 = YYYY-MM-DD
-    const dateMatch = dateLine.match(/^(\d{4}-\d{2}-\d{2})$/);
+    const dateMatch = dateLine.match(/^(d{4}-d{2}-d{2})$/);
     const date = dateMatch ? dateMatch[1] : '';
 
-    // 최소한 조회수/작성자/날짜가 모두 형태를 만족할 때만 유효 글로 인정
     if (!views || !writer || !date) continue;
 
-    // 제목에 해당하는 a[href*="content.asp"] 링크 찾기
-    // 제목 텍스트가 줄바꿈 등으로 조금 달라질 수 있으니, 포함 관계로 느슨하게 매칭
     let href = '';
     $('a[href*="content.asp"]').each((_, a) => {
-      const text = $(a).text().replace(/\s+/g, ' ').trim();
+      const text = $(a).text().replace(/s+/g, ' ').trim();
       if (!text) return;
       if (title.includes(text) || text.includes(title)) {
         href = $(a).attr('href') || '';
-        return false; // break
+        return false;
       }
     });
 
     if (!href) continue;
     if (href.includes('WatchList.asp')) continue;
 
-    const id = href.trim();
+    const id = normalizeId(href);
 
     let url;
     try {
@@ -208,6 +210,7 @@ function parseList(html, board) {
       url,
       views,
       date,
+      mobileUrl: board.mobileUrl,
     });
   }
 
@@ -250,10 +253,13 @@ function parseList(html, board) {
 
     for (const post of newPosts) {
       const text =
-        `[${post.board}] 새 글 발견\n` +
-        `제목: ${post.title}\n` +
-        `작성자: ${post.writer || '(미상)'}\n` +
-        `링크: ${post.url}`;
+        `[${post.board}] 새 글 발견
+` +
+        `제목: ${post.title}
+` +
+        `작성자: ${post.writer || '(미상)'}
+` +
+        `모바일 보기: ${post.mobileUrl}`;
 
       try {
         await sendTelegramMessage(text);
