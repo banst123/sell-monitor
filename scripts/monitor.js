@@ -40,6 +40,11 @@ const BOARDS = [
     url: 'https://bikesell.co.kr/site/board/list.asp?doltop=MARKET&dolsection=MARKET4',
     mobileUrl: 'https://bikesell.co.kr/site/m/list.asp?doltop=MARKET&dolsection=MARKET4',
   },
+  {
+    name: '기타 중고장터 24',
+    url: 'https://bikesell.co.kr/site/board/list.asp?doltop=MARKET&dolsection=MARKET24',
+    mobileUrl: 'https://bikesell.co.kr/site/m/list.asp?doltop=MARKET&dolsection=MARKET24',
+  },
 ];
 
 const SEEN_FILE = path.join(__dirname, '..', 'seen_posts.json');
@@ -136,12 +141,9 @@ function sendTelegramMessage(text) {
 function normalizeId(href) {
   try {
     const u = new URL(href, 'https://www.bikesell.co.kr');
-    u.hash = '';
-    u.searchParams.delete('Search');
-    u.searchParams.delete('SearchText');
-    u.searchParams.delete('Page');
-    u.searchParams.delete('Gotopage');
-    return u.pathname + '?' + u.searchParams.toString();
+    const seq = u.searchParams.get('seq') || u.searchParams.get('no') || u.searchParams.get('num') || u.searchParams.get('idx') || '';
+    if (seq) return `${u.pathname}?seq=${seq}`;
+    return u.pathname;
   } catch {
     return href.trim();
   }
@@ -243,14 +245,16 @@ function parseList(html, board) {
       }
     }
 
-    if (newPosts.length === 0) {
+    const uniquePosts = Array.from(new Map(newPosts.map((p) => [p.id, p])).values());
+
+    if (uniquePosts.length === 0) {
       console.log('[INFO] 새 글 없음');
       return;
     }
 
-    console.log(`[INFO] 새 글 ${newPosts.length}개 발견, 텔레그램 전송`);
+    console.log(`[INFO] 새 글 ${uniquePosts.length}개 발견, 텔레그램 전송`);
 
-    for (const post of newPosts) {
+    for (const post of uniquePosts) {
       const text =
         `[${post.board}] 새 글 발견\n` +
         `제목: ${post.title}\n` +
