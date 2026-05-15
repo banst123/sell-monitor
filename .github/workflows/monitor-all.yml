@@ -1,7 +1,7 @@
 name: Sell Monitor All (No Filter)
 
 on:
-  # 외부 크론 사이트에서 1시간 간격으로 이 이름을 호출하게 설정하거나, 수동 실행 가능
+  # 외부 크론(1시간 주기) 또는 GitHub 웹에서 수동 실행
   workflow_dispatch:
 
 jobs:
@@ -12,17 +12,16 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # 이미 확인한 글 목록(Seen IDs) 캐시는 그대로 공유합니다 (중복 알림 방지)
+      # 전체 알림 전용 독립 캐시 가동 (5분 키워드 캐시와 분리)
       - name: Cache seen posts
         uses: actions/cache@v4
         with:
           path: seen_posts.json
-          key: sell-monitor-seen-${{ github.run_id }}-${{ github.run_attempt }}
+          key: all-seen-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: |
-            sell-monitor-seen-
+            all-seen-
 
-      # [핵심] 스크립트 실행 직전에 기존 filter_config.json 파일을 강제로 삭제합니다.
-      # 파일이 없으면 스크립트가 알아서 필터 없이 "모든 새 글"을 발송합니다.
+      # 실행 직전 필터 설정 파일을 강제로 삭제하여 모든 글을 전송하도록 유도
       - name: Remove filter config for full monitoring
         run: rm -f filter_config.json
 
