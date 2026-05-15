@@ -48,6 +48,7 @@ const BOARDS = [
 ];
 
 const SEEN_FILE = path.join(__dirname, '..', 'seen_posts.json');
+const CONFIG_FILE = path.join(__dirname, '..', 'filter_config.json');
 
 function loadSeenIds() {
   try {
@@ -67,6 +68,20 @@ function saveSeenIds(set) {
     fs.writeFileSync(SEEN_FILE, JSON.stringify(Array.from(set), null, 2), 'utf8');
   } catch (e) {
     console.error('seen_posts.json 저장 오류:', e);
+  }
+}
+
+function loadFilterConfig() {
+  try {
+    if (!fs.existsSync(CONFIG_FILE)) {
+      console.log('[WARN] filter_config.json 파일이 없어 전체 알림으로 진행합니다.');
+      return { KEYWORDS: [], WRITERS: [] };
+    }
+    const raw = fs.readFileSync(CONFIG_FILE, 'utf8');
+    return JSON.parse(raw);
+  } catch (e) {
+    console.error('[ERROR] filter_config.json 읽기 실패, 전체 알림으로 진행:', e.message);
+    return { KEYWORDS: [], WRITERS: [] };
   }
 }
 
@@ -111,7 +126,7 @@ function sendTelegramMessage(text) {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Content-Length': Buffer.byteLength(payload),
+          'Content-Length': Buffer.byteLength(payload),
       },
     };
 
@@ -146,6 +161,20 @@ function normalizeId(href) {
     return u.pathname;
   } catch {
     return href.trim();
+  }
+}
+
+// 추출된 게시글 주소(id)를 바탕으로 다이렉트 모바일 상세페이지 링크 생성
+function makeMobileDirectUrl(id) {
+  try {
+    const u = new URL(id, 'https://bikesell.co.kr');
+    const seq = u.searchParams.get('seq');
+    if (seq) {
+      return `https://bikesell.co.kr/site/m/content.asp?seq=${seq}`;
+    }
+    return 'https://bikesell.co.kr';
+  } catch {
+    return 'https://bikesell.co.kr';
   }
 }
 
@@ -222,6 +251,9 @@ function parseList(html, board) {
   const seen = loadSeenIds();
   const newSeen = new Set(seen);
   const newPosts = [];
+  
+  // 실행 시점에 JSON 설정 불러오기
+  const FILTER_CONFIG = loadFilterConfig();
 
   try {
     for (const board of BOARDS) {
@@ -252,14 +284,46 @@ function parseList(html, board) {
       return;
     }
 
-    console.log(`[INFO] 새 글 ${uniquePosts.length}개 발견, 텔레그램 전송`);
+    // 키워드 및 게시자 필터링
+    const filteredPosts = uniquePosts.filter((post) => {
+      const titleLower = post.title.toLowerCase();
+      const writerLower = (post.writer || '').toLowerCase();
 
-    for (const post of uniquePosts) {
+      const keywords = Array.isArray(FILTER_CONFIG.KEYWORDS) ? FILTER_CONFIG.KEYWORDS : [];
+      const writers = Array.isArray(FILTER_CONFIG.WRITERS) ? FILTER_CONFIG.WRITERS : [];
+
+      const hasKeywords = keywords.length > 0;
+      const hasWriters = writers.length > 0;
+
+      // 설정 값이 둘 다 비어있다면 필터 없이 모든 새 글 허용
+      if (!hasKeywords && !hasWriters) return true;
+
+      // 1. 키워드 매칭 여부
+      const keywordMatches = hasKeywords && keywords.some((kw) => titleLower.includes(kw.toLowerCase()));
+
+      // 2. 작성자 매칭 여부
+      const writerMatches = hasWriters && writers.some((wr) => writerLower === wr.toLowerCase());
+
+      return keywordMatches || writerMatches;
+    });
+
+    if (filteredPosts.length === 0) {
+      console.log('[INFO] 새 글은 있으나 설정한 키워드/게시자 조건에 맞는 글이 없음');
+      saveSeenIds(newSeen);
+      return;
+    }
+
+    console.log(`[INFO] 조건에 맞는 새 글 ${filteredPosts.length}개 발견, 텔레그램 전송`);
+
+    for (const post of filteredPosts) {
+      // 게시글 고유 seq를 추출하여 모바일 상세 페이지 다이렉트 주소 생성
+      const directMobileUrl = makeMobileDirectUrl(post.id);
+
       const text =
-        `[${post.board}] 새 글 발견\n` +
+        `[${post.board}] 조건 일치 글 발견!\n` +
         `제목: ${post.title}\n` +
         `작성자: ${post.writer || '(미상)'}\n` +
-        `모바일 보기: ${post.mobileUrl}`;
+        `바로가기(모바일): ${directMobileUrl}`;
 
       try {
         await sendTelegramMessage(text);
