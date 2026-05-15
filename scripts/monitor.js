@@ -112,13 +112,12 @@ function httpGet(url) {
   });
 }
 
-// [수정] 하이퍼링크 태그 작동을 위해 parse_mode: 'HTML' 설정 추가
 function sendTelegramMessage(text) {
   return new Promise((resolve, reject) => {
     const payload = JSON.stringify({
       chat_id: CHAT_ID,
       text,
-      parse_mode: 'HTML', // HTML 태그 인식 활성화
+      parse_mode: 'HTML',
       disable_web_page_preview: false,
     });
 
@@ -139,7 +138,6 @@ function sendTelegramMessage(text) {
         try {
           const json = JSON.parse(data);
           if (!json.ok) {
-            console.error('Telegram API error:', json);
             return reject(new Error(json.description || 'Telegram API error'));
           }
           resolve(json);
@@ -166,6 +164,13 @@ function normalizeId(href) {
   }
 }
 
+function escapeHtml(text) {
+  return (text || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
 function parseList(html, board) {
   const $ = cheerio.load(html);
   const listText = $('body').text();
@@ -179,10 +184,15 @@ function parseList(html, board) {
 
   for (let i = 0; i < rawLines.length; i++) {
     const line = rawLines[i];
+    
+    let title = '';
     const titleMatch = line.match(/(.+)\[\s*\d+\s*\]$/);
-    if (!titleMatch) continue;
+    if (titleMatch) {
+      title = titleMatch[1].trim();
+    } else {
+      title = line.trim();
+    }
 
-    const title = titleMatch[1].trim();
     const viewsLine = rawLines[i + 1] || '';
     const writerLine = rawLines[i + 2] || '';
     const dateLine = rawLines[i + 3] || '';
@@ -228,19 +238,11 @@ function parseList(html, board) {
       url,
       views,
       date,
-      mobileUrl: board.mobileUrl, // 해당 게시판의 모바일 목록 주소
+      mobileUrl: board.mobileUrl,
     });
   }
 
   return results;
-}
-
-// HTML 특수문자 탈출 함수 (텔레그램 HTML 모드 에러 방지용)
-function escapeHtml(text) {
-  return (text || '')
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;');
 }
 
 (async () => {
@@ -279,6 +281,7 @@ function escapeHtml(text) {
       return;
     }
 
+    // [요청 반영] 작성자(Writers)도 키워드처럼 부분 일치(포함 관계)로 걸러내는 필터 로직
     const filteredPosts = uniquePosts.filter((post) => {
       const titleLower = post.title.toLowerCase();
       const writerLower = (post.writer || '').toLowerCase();
@@ -292,7 +295,7 @@ function escapeHtml(text) {
       if (!hasKeywords && !hasWriters) return true;
 
       const keywordMatches = hasKeywords && keywords.some((kw) => titleLower.includes(kw.toLowerCase()));
-      const writerMatches = hasWriters && writers.some((wr) => writerLower === wr.toLowerCase());
+      const writerMatches = hasWriters && writers.some((wr) => writerLower.includes(wr.toLowerCase()));
 
       return keywordMatches || writerMatches;
     });
@@ -303,15 +306,13 @@ function escapeHtml(text) {
       return;
     }
 
-    console.log(`[INFO] 조건에 맞는 새 글 ${filteredPosts.length}개 발견, 텔레그램 전송`);
+    console.log(`[INFO] 조건에 맞는 새 글 ${filteredPosts.length}개 발견, 텔레그램 전송 시작`);
 
     for (const post of filteredPosts) {
-      // 제목과 작성자에 포함될 수 있는 특수문자(<, >, &) 처리
       const safeTitle = escapeHtml(post.title);
       const safeWriter = escapeHtml(post.writer || '(미상)');
       const safeBoard = escapeHtml(post.board);
 
-      // [핵심 변경] 제목을 누르면 해당 게시판의 모바일 목록 페이지로 바로 이동하도록 하이퍼링크 매핑
       const text =
         `[${safeBoard}] 조건 일치 글 발견!\n` +
         `제목: <b><a href="${post.mobileUrl}">${safeTitle}</a></b>\n` +
@@ -321,7 +322,7 @@ function escapeHtml(text) {
         await sendTelegramMessage(text);
         console.log('[OK] 메시지 전송:', post.title, '/', post.writer || '(미상)');
       } catch (e) {
-        console.error('[ERROR] 메시지 전송 실패:', e.message);
+        console.error(`[ERROR] 메시지 전송 실패 (${post.title}):`, e.message);
       }
     }
 
