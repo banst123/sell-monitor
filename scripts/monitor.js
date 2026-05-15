@@ -150,8 +150,9 @@ function normalizeId(href) {
 function parseList(html, board) {
   const $ = cheerio.load(html);
   const listText = $('body').text();
+
   const rawLines = listText
-    .split(/\r?\n/)
+    .split('/n')
     .map((s) => s.trim())
     .filter((s) => s.length > 0);
 
