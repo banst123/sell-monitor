@@ -59,8 +59,7 @@ function loadSeenIds() {
 
 function saveSeenIds(set) {
   try {
-    const arr = Array.from(set);
-    fs.writeFileSync(SEEN_FILE, JSON.stringify(arr, null, 2), 'utf8');
+    fs.writeFileSync(SEEN_FILE, JSON.stringify(Array.from(set), null, 2), 'utf8');
   } catch (e) {
     console.error('seen_posts.json 저장 오류:', e);
   }
@@ -150,55 +149,47 @@ function normalizeId(href) {
 
 function parseList(html, board) {
   const $ = cheerio.load(html);
+  const listText = $('body').text();
+  const rawLines = listText
+    .split(/\r?\n/)
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+
   const results = [];
 
-  $('a[href*="content.asp"]').each((_, a) => {
-    const $a = $(a);
-    const title = $a.text().replace(/s+/g, ' ').trim();
-    const href = $a.attr('href') || '';
+  for (let i = 0; i < rawLines.length; i++) {
+    const line = rawLines[i];
+    const titleMatch = line.match(/(.+)[s*d+s*]$/);
+    if (!titleMatch) continue;
 
-    if (!title || !href) return;
-    if (href.includes('WatchList.asp')) return;
+    const title = titleMatch[1].trim();
+    const viewsLine = rawLines[i + 1] || '';
+    const writerLine = rawLines[i + 2] || '';
+    const dateLine = rawLines[i + 3] || '';
 
-    const row = $a.closest('tr');
-    if (!row.length) return;
+    const viewsMatch = viewsLine.match(/^(d+)$/);
+    const views = viewsMatch ? viewsMatch[1] : '';
 
-    const cells = row.find('td');
-    if (!cells.length) return;
+    const writerMatch = writerLine.match(/^([w가-힣]+)$/);
+    const writer = writerMatch ? writerMatch[1] : '';
 
-    const texts = cells
-      .map((_, td) => $(td).text().replace(/s+/g, ' ').trim())
-      .get()
-      .filter(Boolean);
+    const dateMatch = dateLine.match(/^(d{4}-d{2}-d{2})$/);
+    const date = dateMatch ? dateMatch[1] : '';
 
-    if (texts.length < 3) return;
+    if (!views || !writer || !date) continue;
 
-    let writer = '';
-    let date = '';
-    let views = '';
-
-    for (const t of texts) {
-      if (!date && /^d{4}-d{2}-d{2}$/.test(t)) {
-        date = t;
-        continue;
+    let href = '';
+    $('a[href*="content.asp"]').each((_, a) => {
+      const text = $(a).text().replace(/s+/g, ' ').trim();
+      if (!text) return;
+      if (title.includes(text) || text.includes(title)) {
+        href = $(a).attr('href') || '';
+        return false;
       }
-      if (!views && /^d+$/.test(t)) {
-        views = t;
-        continue;
-      }
-    }
+    });
 
-    for (const t of texts) {
-      if (t === title) continue;
-      if (t === views) continue;
-      if (t === date) continue;
-      if (/^d+$/.test(t)) continue;
-      if (/^d{4}-d{2}-d{2}$/.test(t)) continue;
-      writer = t;
-      break;
-    }
-
-    if (!writer || !date) return;
+    if (!href) continue;
+    if (href.includes('WatchList.asp')) continue;
 
     const id = normalizeId(href);
 
@@ -219,7 +210,7 @@ function parseList(html, board) {
       date,
       mobileUrl: board.mobileUrl,
     });
-  });
+  }
 
   return results;
 }
