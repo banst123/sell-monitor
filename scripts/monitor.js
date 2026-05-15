@@ -152,8 +152,9 @@ function parseList(html, board) {
   const $ = cheerio.load(html);
   const listText = $('body').text();
   const rawLines = listText
-    .split('
-')
+    .split(/
+?
+/)
     .map((s) => s.trim())
     .filter((s) => s.length > 0);
 
