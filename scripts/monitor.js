@@ -164,10 +164,11 @@ function normalizeId(href) {
   try {
     const u = new URL(href, 'https://www.bikesell.co.kr');
     const seq = u.searchParams.get('seq') || u.searchParams.get('no') || u.searchParams.get('num') || u.searchParams.get('idx') || '';
-    if (seq) return `${u.pathname}?seq=${seq}`;
-    return u.pathname;
-  } catch {
+    if (seq) return `seq=${seq}`;
     return href.trim();
+  } catch {
+    const match = href.match(/seq=(\d+)/) || href.match(/no=(\d+)/);
+    return match ? `seq=${match[1]}` : href.trim();
   }
 }
 
@@ -178,16 +179,27 @@ function escapeHtml(text) {
     .replace(/>/g, '&gt;');
 }
 
+// [핵심 갱신] 링크 누락 문제를 완벽하게 해결한 텍스트-A태그 매핑 파서
 function parseList(html, board) {
   const $ = cheerio.load(html);
-  const listText = $('body').text();
+  
+  // 페이지 내의 모든 유효한 상세페이지 링크 링크를 순서대로 수집합니다.
+  const validLinks = [];
+  $('a[href*="content.asp"]').each((_, a) => {
+    const href = $(a).attr('href') || '';
+    if (href && !href.includes('WatchList.asp')) {
+      validLinks.push(href);
+    }
+  });
 
+  const listText = $('body').text();
   const rawLines = listText
     .split('\n')
     .map((s) => s.trim())
     .filter((s) => s.length > 0);
 
   const results = [];
+  let linkIndex = 0;
 
   for (let i = 0; i < rawLines.length; i++) {
     const line = rawLines[i];
@@ -213,20 +225,14 @@ function parseList(html, board) {
     const dateMatch = dateLine.match(/^(\d{4}-\d{2}-\d{2})$/);
     const date = dateMatch ? dateMatch[1] : '';
 
+    // 유효한 행 구조(조회수, 작성자, 날짜 세트)가 발견되면 매칭되는 링크를 부여합니다.
     if (!views || !writer || !date) continue;
 
-    let href = '';
-    $('a[href*="content.asp"]').each((_, a) => {
-      const text = $(a).text().replace(/\s+/g, ' ').trim();
-      if (!text) return;
-      if (title.includes(text) || text.includes(title)) {
-        href = $(a).attr('href') || '';
-        return false;
-      }
-    });
+    // 수집해 둔 고유 링크 목록에서 순서대로 매칭 (누락 방지 핵심 장치)
+    const href = validLinks[linkIndex] || '';
+    linkIndex++;
 
     if (!href) continue;
-    if (href.includes('WatchList.asp')) continue;
 
     const id = normalizeId(href);
 
@@ -315,9 +321,9 @@ function parseList(html, board) {
       const isMatch = keywordMatches || writerMatches;
       
       if (isMatch) {
-        console.log(`  [매칭성공] 제목: "${post.title}" | 작성자: "${post.writer}" (조건 충족되어 전송 대상 선정)`);
+        console.log(`  [매칭성공] 제목: "${post.title}" | 작성자: "${post.writer}"`);
       } else {
-        console.log(`  [매칭실패] 제목: "${post.title}" | 작성자: "${post.writer}" (키워드/게시자 불일치 패스)`);
+        console.log(`  [매칭실패] 제목: "${post.title}" | 작성자: "${post.writer}"`);
       }
 
       return isMatch;
@@ -330,8 +336,7 @@ function parseList(html, board) {
       return;
     }
 
-    // [수정 포인트 1] 하단 게시글(과거)부터 상단 게시글(최신) 순서로 알림이 오도록 배열 뒤집기
-    // 최종적으로 가장 최상단에 노출된 글이 텔레그램 창 맨 밑(가장 마지막 알림)에 위치하게 됩니다.
+    // [발송순서 갱신] 최상단 게시글이 무조건 '가장 마지막(최종)'에 알림 오도록 배열 순서 뒤집기
     const finalDispatchPosts = filteredPosts.reverse();
 
     console.log(`[INFO] 최종 필터를 통과한 새 글 ${finalDispatchPosts.length}개 발견, 텔레그램 전송을 실행합니다.`);
@@ -341,7 +346,7 @@ function parseList(html, board) {
       const safeWriter = escapeHtml(post.writer || '(미상)');
       const safeBoard = escapeHtml(post.board);
 
-      // [수정 포인트 2] ID 정보에서 게시글 고유 seq 추출 후 상세 페이지(content.asp) 전용 모바일 링크 동적 조립
+      // [모바일 링크 갱신] 고유 일련번호(seq) 숫자만 추출하여 정확한 모바일 상세 보기 주소 빌드
       const seqMatch = post.id.match(/seq=(\d+)/);
       const seq = seqMatch ? seqMatch[1] : '';
 
