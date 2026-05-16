@@ -292,14 +292,13 @@ function parseList(html, board) {
       const hasKeywords = keywords.length > 0;
       const hasWriters = writers.length > 0;
 
-      // 1. 키워드와 작성자 조건이 모두 없을 때 -> 전체 수집 모드이므로 무조건 통과 (정기검색)
       if (!hasKeywords && !hasWriters) {
+        post.matchType = 'PERIODIC';
         post.matchReason = '🕒 정기검색 결과';
         finalDispatchPosts.push(post);
         continue;
       }
 
-      // 2. 일치한 타겟 정보 추적 변수
       let matchedKeyword = '';
       let matchedWriter = '';
 
@@ -313,15 +312,14 @@ function parseList(html, board) {
         if (found) matchedWriter = found;
       }
 
-      // 3. 매칭 사유에 맞춰 타이틀 태그 부여
-      if (matchedKeyword && matchedWriter) {
-        post.matchReason = `✨ 대박! 키워드&게시자 동시 일치 (${matchedKeyword} / ${matchedWriter})`;
+      // 상태별 분류 플래그 고정 (WRITER_MATCH 가 최상위 우선순위)
+      if (matchedWriter) {
+        post.matchType = 'WRITER_MATCH';
+        post.matchReason = matchedWriter;
         finalDispatchPosts.push(post);
       } else if (matchedKeyword) {
+        post.matchType = 'KEYWORD_MATCH';
         post.matchReason = `✨ 키워드 일치! (${matchedKeyword})`;
-        finalDispatchPosts.push(post);
-      } else if (matchedWriter) {
-        post.matchReason = `👤 지정 게시자 발견! (${matchedWriter})`;
         finalDispatchPosts.push(post);
       } else {
         console.log(`  [매칭실패] 제목: "${post.title}" | 작성자: "${post.writer}"`);
@@ -335,7 +333,6 @@ function parseList(html, board) {
       return;
     }
 
-    // 시간 순서 정렬 (오래된 글부터 전송)
     const sortedDispatchPosts = finalDispatchPosts.reverse();
 
     console.log(`[INFO] 최종 발송 대상 새 글 ${sortedDispatchPosts.length}개 발견, 텔레그램 전송을 실행합니다.`);
@@ -357,16 +354,31 @@ function parseList(html, board) {
         finalDesktopUrl = post.baseDesktopUrl.replace('list.asp', 'content.asp') + `&dolseq=${seq}`;
       }
 
-      // [핵심 교정] 첫 줄에 매칭 사유(이유)를 동적으로 삽입
-      const text =
-        `[${safeBoard}] ${safeReason}\n` +
-        `제목: <b>${safeTitle}</b>\n` +
-        `작성자: ${safeWriter}\n` +
-        `🔗 <b>링크:</b> <a href="${finalMobileUrl}">[📱 모바일 보기]</a> | <a href="${finalDesktopUrl}">[💻 PC 보기]</a>`;
+      // [초강조 연출 엔진] 매칭 타입에 따른 메시지 조립 분기 처리
+      let text = '';
+      
+      if (post.matchType === 'WRITER_MATCH') {
+        // 지정 작성자 매칭 시: 사이렌 이모지 도배 및 코드 블록(태그) 레이아웃 적용
+        text =
+          `🚨🚨🚨 <b>[${safeBoard}]</b> 🚨🚨🚨\n` +
+          `⚠️ <b>지정 게시자 급보!!</b> ⚠️\n\n` +
+          `<code>👤 작성자: [ ${safeWriter} ] 일치 발견!</code>\n\n` +
+          `━━━━━━━━━━━━━━━━━━\n` +
+          `📝 제목: <b>${safeTitle}</b>\n` +
+          `🔗 <b>링크:</b> <a href="${finalMobileUrl}">[📱 모바일 보기]</a> | <a href="${finalDesktopUrl}">[💻 PC 보기]</a>\n` +
+          `━━━━━━━━━━━━━━━━━━`;
+      } else {
+        // 일반 키워드 매칭 혹은 정기 검색 결과 레이아웃
+        text =
+          `[${safeBoard}] ${safeReason}\n` +
+          `제목: <b>${safeTitle}</b>\n` +
+          `작성자: ${safeWriter}\n` +
+          `🔗 <b>링크:</b> <a href="${finalMobileUrl}">[📱 모바일 보기]</a> | <a href="${finalDesktopUrl}">[💻 PC 보기]</a>`;
+      }
 
       try {
         await sendTelegramMessage(text);
-        console.log(`  [OK] 전송완료 -> 사유: ${post.matchReason} | 제목: ${post.title}`);
+        console.log(`  [OK] 전송완료 -> 타입: ${post.matchType} | 제목: ${post.title}`);
       } catch (e) {
         console.error(`  [ERROR] 전송실패 -> 제목: (${post.title}):`, e.message);
       }
