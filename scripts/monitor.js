@@ -207,6 +207,7 @@ function parseList(html, board) {
     let views = '';
     let date = '';
 
+    // [핵심 해결 조치] 라인 파싱 단계에서 "로그인유지"를 원천 차단하고 순수 ID 및 한글 닉네임 필터링
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i];
       
@@ -218,6 +219,12 @@ function parseList(html, board) {
         date = line;
         continue;
       }
+      
+      // ⚠️ '로그인유지'라는 정적 단어는 작성자 이름으로 채택하지 않고 패스합니다.
+      if (line.includes('로그인유지')) {
+        continue;
+      }
+
       if (!writer && /^([\w가-힣]+)$/.test(line) && !line.includes(title) && line !== views && line !== date) {
         writer = line;
       }
@@ -312,7 +319,6 @@ function parseList(html, board) {
         if (found) matchedWriter = found;
       }
 
-      // 상태별 분류 플래그 고정 (WRITER_MATCH 가 최상위 우선순위)
       if (matchedWriter) {
         post.matchType = 'WRITER_MATCH';
         post.matchReason = matchedWriter;
@@ -354,11 +360,9 @@ function parseList(html, board) {
         finalDesktopUrl = post.baseDesktopUrl.replace('list.asp', 'content.asp') + `&dolseq=${seq}`;
       }
 
-      // [초강조 연출 엔진] 매칭 타입에 따른 메시지 조립 분기 처리
       let text = '';
       
       if (post.matchType === 'WRITER_MATCH') {
-        // 지정 작성자 매칭 시: 사이렌 이모지 도배 및 코드 블록(태그) 레이아웃 적용
         text =
           `🚨🚨🚨 <b>[${safeBoard}]</b> 🚨🚨🚨\n` +
           `⚠️ <b>지정 게시자 급보!!</b> ⚠️\n\n` +
@@ -368,7 +372,6 @@ function parseList(html, board) {
           `🔗 <b>링크:</b> <a href="${finalMobileUrl}">[📱 모바일 보기]</a> | <a href="${finalDesktopUrl}">[💻 PC 보기]</a>\n` +
           `━━━━━━━━━━━━━━━━━━`;
       } else {
-        // 일반 키워드 매칭 혹은 정기 검색 결과 레이아웃
         text =
           `[${safeBoard}] ${safeReason}\n` +
           `제목: <b>${safeTitle}</b>\n` +
