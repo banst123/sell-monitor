@@ -4,7 +4,6 @@ on:
   # 외부 크론(5분 주기) 또는 GitHub 웹에서 수동 실행
   workflow_dispatch:
 
-# ⚠️ GitHub Actions 러너가 모든 내부 액션(v4 포함)을 Node.js 24로 강제 구동하도록 설정합니다.
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
@@ -13,12 +12,12 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      # @v4 뒤에 최신 마이너 버전을 명시하여 Node 24 완벽 호환 보장
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v4.2.2
 
-      # 키워드 전용 독립 캐시 가동 (1 hour 전체 알림 캐시와 분리)
       - name: Cache seen posts
-        uses: actions/cache@v4
+        uses: actions/cache@v4.2.0
         with:
           path: seen_posts.json
           key: keyword-seen-${{ github.run_id }}-${{ github.run_attempt }}
@@ -26,7 +25,7 @@ jobs:
             keyword-seen-
 
       - name: Use Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v4.2.0
         with:
           node-version: 24
 
