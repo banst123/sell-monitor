@@ -125,7 +125,7 @@ function sendTelegramMessage(text) {
       chat_id: CHAT_ID,
       text,
       parse_mode: 'HTML',
-      disable_web_page_preview: true, // 기기별 주소가 연속으로 들어가므로 링크 미리보기 팝업은 깔끔하게 차단합니다.
+      disable_web_page_preview: true,
     });
 
     const options = {
@@ -160,18 +160,6 @@ function sendTelegramMessage(text) {
   });
 }
 
-function normalizeId(href) {
-  try {
-    const u = new URL(href, 'https://www.bikesell.co.kr');
-    const seq = u.searchParams.get('seq') || u.searchParams.get('no') || u.searchParams.get('num') || u.searchParams.get('idx') || '';
-    if (seq) return `seq=${seq}`;
-    return href.trim();
-  } catch {
-    const match = href.match(/seq=(\d+)/) || href.match(/no=(\d+)/);
-    return match ? `seq=${match[1]}` : href.trim();
-  }
-}
-
 function escapeHtml(text) {
   return (text || '')
     .replace(/&/g, '&amp;')
@@ -179,68 +167,86 @@ function escapeHtml(text) {
     .replace(/>/g, '&gt;');
 }
 
+// [완벽 개조] 행(tr) 단위로 쪼갠 뒤 오직 순수 제목 태그에서만 링크를 추출하는 정밀 파서
 function parseList(html, board) {
   const $ = cheerio.load(html);
-  
-  const validLinks = [];
-  $('a[href*="content.asp"]').each((_, a) => {
-    const href = $(a).attr('href') || '';
-    if (href && !href.includes('WatchList.asp')) {
-      validLinks.push(href);
-    }
-  });
-
-  const listText = $('body').text();
-  const rawLines = listText
-    .split('\n')
-    .map((s) => s.trim())
-    .filter((s) => s.length > 0);
-
   const results = [];
-  let linkIndex = 0;
 
-  for (let i = 0; i < rawLines.length; i++) {
-    const line = rawLines[i];
+  // 바이크셀의 모든 게시글 목록 테이블 행(tr)을 순회합니다.
+  $('tr').each((_, tr) => {
+    const $tr = $(tr);
     
-    let title = '';
-    const titleMatch = line.match(/(.+)\[\s*\d+\s*\]$/);
-    if (titleMatch) {
-      title = titleMatch[1].trim();
-    } else {
-      title = line.trim();
+    // 행 내부에서 content.asp 링크를 가진 a 태그들을 찾습니다.
+    const $links = $tr.find('a[href*="content.asp"]');
+    if ($links.length === 0) return;
+
+    // [핵심 교정] 동일 tr 내에 링크가 여러 개(이미지, 아이콘 등) 있을 경우, 
+    // 실제 '글 제목 텍스트'를 품고 있는 온전한 제목 태그 하나만 정밀 필터링합니다.
+    let $titleLink = null;
+    $links.each((_, a) => {
+      const $a = $(a);
+      const href = $a.attr('href') || '';
+      const text = $a.text().trim();
+      
+      // 장바구니 링크 제외 및 텍스트가 채워져 있는 본문 제목용 태그 선정
+      if (!href.includes('WatchList.asp') && text.length > 1) {
+        $titleLink = $a;
+        return false; // 매칭되는 진짜 제목 링크를 찾았으므로 루프 조기 종료
+      }
+    });
+
+    if (!$titleLink) return;
+
+    const href = $titleLink.attr('href') || '';
+    const seqMatch = href.match(/seq=(\d+)/) || href.match(/no=(\d+)/);
+    if (!seqMatch) return;
+    const seq = seqMatch[1];
+
+    // 해당 행(tr)의 전체 텍스트 라인 분할 파싱
+    const containerText = $tr.text() || '';
+    const lines = containerText.split('\n').map(s => s.trim()).filter(s => s.length > 0);
+
+    // 제목 및 댓글수 제거 가공
+    let title = $titleLink.text().replace(/\s+/g, ' ').trim();
+    title = title.replace(/\[\s*\d+\s*\]$/, '').trim();
+
+    if (!title) return;
+
+    // 행 내부 데이터에서 작성자 파싱 추출
+    let writer = '';
+    let views = '';
+    let date = '';
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      
+      if (!views && /^\d+$/.test(line) && line !== seq) {
+        views = line;
+        continue;
+      }
+      if (!date && /^\d{4}-\d{2}-\d{2}$/.test(line)) {
+        date = line;
+        continue;
+      }
+      if (!writer && /^([\w가-힣]+)$/.test(line) && !line.includes(title) && line !== views && line !== date) {
+        writer = line;
+      }
     }
 
-    const viewsLine = rawLines[i + 1] || '';
-    const writerLine = rawLines[i + 2] || '';
-    const dateLine = rawLines[i + 3] || '';
+    const id = `seq=${seq}`;
 
-    const viewsMatch = viewsLine.match(/^(\d+)$/);
-    const views = viewsMatch ? viewsMatch[1] : '';
-
-    const writerMatch = writerLine.match(/^([\w가-힣]+)$/);
-    const writer = writerMatch ? writerMatch[1] : '';
-
-    const dateMatch = dateLine.match(/^(\d{4}-\d{2}-\d{2})$/);
-    const date = dateMatch ? dateMatch[1] : '';
-
-    if (!views || !writer || !date) continue;
-
-    const href = validLinks[linkIndex] || '';
-    linkIndex++;
-
-    if (!href) continue;
-
-    const id = normalizeId(href);
+    // 행 내부 파싱이므로 중복 등록 방지 처리
+    if (results.some(p => p.id === id)) return;
 
     results.push({
       id,
       board: board.name,
       title,
-      writer,
+      writer: writer || '확인불가',
       baseMobileUrl: board.mobileUrl,
       baseDesktopUrl: board.url,
     });
-  }
+  });
 
   return results;
 }
@@ -332,11 +338,9 @@ function parseList(html, board) {
       const safeWriter = escapeHtml(post.writer || '(미상)');
       const safeBoard = escapeHtml(post.board);
 
-      // 고유 일련번호(seq) 추출
       const seqMatch = post.id.match(/seq=(\d+)/);
       const seq = seqMatch ? seqMatch[1] : '';
 
-      // [핵심 기능] 모바일용과 PC용 상세페이지(content.asp) 주소를 각각 조립합니다.
       let finalMobileUrl = 'https://bikesell.co.kr';
       let finalDesktopUrl = 'https://bikesell.co.kr';
 
@@ -345,7 +349,6 @@ function parseList(html, board) {
         finalDesktopUrl = post.baseDesktopUrl.replace('list.asp', 'content.asp') + `&dolseq=${seq}`;
       }
 
-      // 텔레그램 메시지 포맷팅: 기기별 링크 분할 매핑
       const text =
         `[${safeBoard}] 조건 일치 글 발견!\n` +
         `제목: <b>${safeTitle}</b>\n` +
