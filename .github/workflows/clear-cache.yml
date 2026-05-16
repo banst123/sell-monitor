@@ -1,0 +1,34 @@
+name: Clear All Caches
+
+on:
+  workflow_dispatch: # 직접 수동으로 실행 버튼을 누를 때만 작동합니다.
+
+permissions:
+  actions: write # 캐시를 삭제할 수 있는 권한 부여
+
+jobs:
+  clear-cache:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Clear Caches
+        uses: actions/github-script@v7
+        with:
+          script: |
+            console.log("캐시 목록 조회 중...");
+            const caches = await github.rest.actions.getActionsCacheList({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              per_page: 100 // 최대 100개씩 가져옴
+            });
+            
+            console.log(`총 ${caches.data.actions_caches.length}개의 캐시 묶음 발견.`);
+            
+            for (const cache of caches.data.actions_caches) {
+              console.log(`캐시 삭제 중: ID ${cache.id} (${cache.key})`);
+              await github.rest.actions.deleteActionsCacheById({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                cache_id: cache.id,
+              });
+            }
+            console.log("첫 번째 페이지 삭제 완료! (100개 이상일 경우 워크플로우를 한 번 더 실행해주세요)");
