@@ -15,7 +15,7 @@ const TOKEN = process.env.TELEGRAM_TOKEN;
 const CHAT_ID = process.env.TELEGRAM_CHAT_ID;
 
 if (!TOKEN || !CHAT_ID) {
-  console.error('TELEGRAM_TOKEN 또는 TELEGRAM_CHAT_ID 환경변수가 없습니다.');
+  console.error('[FATAL] TELEGRAM_TOKEN 또는 TELEGRAM_CHAT_ID 환경변수가 없습니다.');
   process.exit(1);
 }
 
@@ -52,13 +52,17 @@ const CONFIG_FILE = path.join(__dirname, '..', 'filter_config.json');
 
 function loadSeenIds() {
   try {
-    if (!fs.existsSync(SEEN_FILE)) return new Set();
+    if (!fs.existsSync(SEEN_FILE)) {
+      console.log('[DEBUG] seen_posts.json 파일이 없어 빈 Set을 생성합니다.');
+      return new Set();
+    }
     const raw = fs.readFileSync(SEEN_FILE, 'utf8');
     const arr = JSON.parse(raw);
+    console.log(`[DEBUG] 불러온 기존 캐시(이미 본 글) 개수: ${arr.length}개`);
     if (!Array.isArray(arr)) return new Set();
     return new Set(arr);
   } catch (e) {
-    console.error('seen_posts.json 읽기 오류:', e);
+    console.error('[ERROR] seen_posts.json 읽기 오류:', e);
     return new Set();
   }
 }
@@ -66,19 +70,22 @@ function loadSeenIds() {
 function saveSeenIds(set) {
   try {
     fs.writeFileSync(SEEN_FILE, JSON.stringify(Array.from(set), null, 2), 'utf8');
+    console.log(`[DEBUG] 캐시 업데이트 완료. 현재 총 저장된 글 개수: ${set.size}개`);
   } catch (e) {
-    console.error('seen_posts.json 저장 오류:', e);
+    console.error('[ERROR] seen_posts.json 저장 오류:', e);
   }
 }
 
 function loadFilterConfig() {
   try {
     if (!fs.existsSync(CONFIG_FILE)) {
-      console.log('[WARN] filter_config.json 파일이 없어 전체 알림으로 진행합니다.');
+      console.log('[WARN] filter_config.json 파일이 없어 전체 알림 모드로 진행합니다.');
       return { KEYWORDS: [], WRITERS: [] };
     }
     const raw = fs.readFileSync(CONFIG_FILE, 'utf8');
-    return JSON.parse(raw);
+    const config = JSON.parse(raw);
+    console.log('[DEBUG] 로드된 필터 설정:', JSON.stringify(config));
+    return config;
   } catch (e) {
     console.error('[ERROR] filter_config.json 읽기 실패, 전체 알림으로 진행:', e.message);
     return { KEYWORDS: [], WRITERS: [] };
@@ -246,6 +253,7 @@ function parseList(html, board) {
 }
 
 (async () => {
+  console.log('[DEBUG] 모니터링 스크립트 작동 시작...');
   const seen = loadSeenIds();
   const newSeen = new Set(seen);
   const newPosts = [];
@@ -254,7 +262,7 @@ function parseList(html, board) {
 
   try {
     for (const board of BOARDS) {
-      console.log(`[INFO] ${board.name} 페이지 요청: ${board.url}`);
+      console.log(`\n[INFO] ${board.name} 페이지 요청 중: ${board.url}`);
       let html;
       try {
         html = await httpGet(board.url);
@@ -264,7 +272,12 @@ function parseList(html, board) {
       }
 
       const posts = parseList(html, board);
-      console.log(`[INFO] ${board.name} 파싱 결과: ${posts.length}개 항목`);
+      console.log(`[INFO] ${board.name} 파싱 성공: 총 ${posts.length}개 항목 추출됨`);
+
+      // 파싱된 글 목록 상위 2개 디버깅 로그 출력
+      if (posts.length > 0) {
+        console.log(`  └─ [파싱샘플 1] 제목: "${posts[0].title}" | 작성자: "${posts[0].writer}"`);
+      }
 
       for (const post of posts) {
         if (!seen.has(post.id)) {
@@ -275,13 +288,15 @@ function parseList(html, board) {
     }
 
     const uniquePosts = Array.from(new Map(newPosts.map((p) => [p.id, p])).values());
+    console.log(`\n[DEBUG] 중복 제거 후 새로 발견된 전체 글 개수: ${uniquePosts.length}개`);
 
     if (uniquePosts.length === 0) {
-      console.log('[INFO] 새 글 없음');
+      console.log('[INFO] 새로 올라온 글이 아예 없습니다. 종료합니다.');
       return;
     }
 
-    // [요청 반영] 작성자(Writers)도 키워드처럼 부분 일치(포함 관계)로 걸러내는 필터 로직
+    // 필터 작동 단계 디버깅 로그 강화
+    console.log('\n[DEBUG] --- 필터링 조건 검사 시작 ---');
     const filteredPosts = uniquePosts.filter((post) => {
       const titleLower = post.title.toLowerCase();
       const writerLower = (post.writer || '').toLowerCase();
@@ -292,21 +307,33 @@ function parseList(html, board) {
       const hasKeywords = keywords.length > 0;
       const hasWriters = writers.length > 0;
 
-      if (!hasKeywords && !hasWriters) return true;
+      if (!hasKeywords && !hasWriters) {
+        return true; // 무조건 통과 (전체 알림)
+      }
 
       const keywordMatches = hasKeywords && keywords.some((kw) => titleLower.includes(kw.toLowerCase()));
       const writerMatches = hasWriters && writers.some((wr) => writerLower.includes(wr.toLowerCase()));
 
-      return keywordMatches || writerMatches;
+      const isMatch = keywordMatches || writerMatches;
+      
+      // 필터에 매칭되었든 안 되었든 분석 편하도록 로그 기록
+      if (isMatch) {
+        console.log(`  [매칭성공] 제목: "${post.title}" | 작성자: "${post.writer}" (조건 충족되어 전송 대상 선정)`);
+      } else {
+        console.log(`  [매칭실패] 제목: "${post.title}" | 작성자: "${post.writer}" (키워드/게시자 불일치 패스)`);
+      }
+
+      return isMatch;
     });
+    console.log('[DEBUG] --- 필터링 조건 검사 종료 ---\n');
 
     if (filteredPosts.length === 0) {
-      console.log('[INFO] 새 글은 있으나 설정한 키워드/게시자 조건에 맞는 글이 없음');
+      console.log('[INFO] 새 글은 감지되었으나 설정한 키워드/게시자 조건에 걸리는 글이 단 하나도 없습니다.');
       saveSeenIds(newSeen);
       return;
     }
 
-    console.log(`[INFO] 조건에 맞는 새 글 ${filteredPosts.length}개 발견, 텔레그램 전송 시작`);
+    console.log(`[INFO] 최종 필터를 통과한 새 글 ${filteredPosts.length}개 발견, 텔레그램 전송을 실행합니다.`);
 
     for (const post of filteredPosts) {
       const safeTitle = escapeHtml(post.title);
@@ -320,15 +347,15 @@ function parseList(html, board) {
 
       try {
         await sendTelegramMessage(text);
-        console.log('[OK] 메시지 전송:', post.title, '/', post.writer || '(미상)');
+        console.log(`  [OK] 전송완료 -> 제목: ${post.title} / 작성자: ${post.writer}`);
       } catch (e) {
-        console.error(`[ERROR] 메시지 전송 실패 (${post.title}):`, e.message);
+        console.error(`  [ERROR] 전송실패 -> 제목: (${post.title}):`, e.message);
       }
     }
 
     saveSeenIds(newSeen);
   } catch (e) {
-    console.error('[FATAL] 스크립트 오류:', e);
+    console.error('[FATAL] 스크립트 처리 중 심각한 오류 발생:', e);
     process.exit(1);
   }
 })();
