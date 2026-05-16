@@ -274,7 +274,6 @@ function parseList(html, board) {
       const posts = parseList(html, board);
       console.log(`[INFO] ${board.name} 파싱 성공: 총 ${posts.length}개 항목 추출됨`);
 
-      // 파싱된 글 목록 상위 2개 디버깅 로그 출력
       if (posts.length > 0) {
         console.log(`  └─ [파싱샘플 1] 제목: "${posts[0].title}" | 작성자: "${posts[0].writer}"`);
       }
@@ -295,7 +294,6 @@ function parseList(html, board) {
       return;
     }
 
-    // 필터 작동 단계 디버깅 로그 강화
     console.log('\n[DEBUG] --- 필터링 조건 검사 시작 ---');
     const filteredPosts = uniquePosts.filter((post) => {
       const titleLower = post.title.toLowerCase();
@@ -308,7 +306,7 @@ function parseList(html, board) {
       const hasWriters = writers.length > 0;
 
       if (!hasKeywords && !hasWriters) {
-        return true; // 무조건 통과 (전체 알림)
+        return true; 
       }
 
       const keywordMatches = hasKeywords && keywords.some((kw) => titleLower.includes(kw.toLowerCase()));
@@ -316,7 +314,6 @@ function parseList(html, board) {
 
       const isMatch = keywordMatches || writerMatches;
       
-      // 필터에 매칭되었든 안 되었든 분석 편하도록 로그 기록
       if (isMatch) {
         console.log(`  [매칭성공] 제목: "${post.title}" | 작성자: "${post.writer}" (조건 충족되어 전송 대상 선정)`);
       } else {
@@ -333,21 +330,34 @@ function parseList(html, board) {
       return;
     }
 
-    console.log(`[INFO] 최종 필터를 통과한 새 글 ${filteredPosts.length}개 발견, 텔레그램 전송을 실행합니다.`);
+    // [수정 포인트 1] 하단 게시글(과거)부터 상단 게시글(최신) 순서로 알림이 오도록 배열 뒤집기
+    // 최종적으로 가장 최상단에 노출된 글이 텔레그램 창 맨 밑(가장 마지막 알림)에 위치하게 됩니다.
+    const finalDispatchPosts = filteredPosts.reverse();
 
-    for (const post of filteredPosts) {
+    console.log(`[INFO] 최종 필터를 통과한 새 글 ${finalDispatchPosts.length}개 발견, 텔레그램 전송을 실행합니다.`);
+
+    for (const post of finalDispatchPosts) {
       const safeTitle = escapeHtml(post.title);
       const safeWriter = escapeHtml(post.writer || '(미상)');
       const safeBoard = escapeHtml(post.board);
 
+      // [수정 포인트 2] ID 정보에서 게시글 고유 seq 추출 후 상세 페이지(content.asp) 전용 모바일 링크 동적 조립
+      const seqMatch = post.id.match(/seq=(\d+)/);
+      const seq = seqMatch ? seqMatch[1] : '';
+
+      let finalMobileUrl = post.mobileUrl;
+      if (seq) {
+        finalMobileUrl = post.mobileUrl.replace('list.asp', 'content.asp') + `&dolseq=${seq}`;
+      }
+
       const text =
         `[${safeBoard}] 조건 일치 글 발견!\n` +
-        `제목: <b><a href="${post.mobileUrl}">${safeTitle}</a></b>\n` +
+        `제목: <b><a href="${finalMobileUrl}">${safeTitle}</a></b>\n` +
         `작성자: ${safeWriter}`;
 
       try {
         await sendTelegramMessage(text);
-        console.log(`  [OK] 전송완료 -> 제목: ${post.title} / 작성자: ${post.writer}`);
+        console.log(`  [OK] 전송완료 -> 제목: ${post.title} | 링크: ${finalMobileUrl}`);
       } catch (e) {
         console.error(`  [ERROR] 전송실패 -> 제목: (${post.title}):`, e.message);
       }
