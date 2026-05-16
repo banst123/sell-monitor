@@ -52,9 +52,7 @@ const CONFIG_FILE = path.join(__dirname, '..', 'filter_config.json');
 
 function loadSeenIds() {
   try {
-    if (!fs.existsSync(SEEN_FILE)) {
-      return new Set();
-    }
+    if (!fs.existsSync(SEEN_FILE)) return new Set();
     const raw = fs.readFileSync(SEEN_FILE, 'utf8');
     const arr = JSON.parse(raw);
     if (!Array.isArray(arr)) return new Set();
@@ -74,9 +72,7 @@ function saveSeenIds(set) {
 
 function loadFilterConfig() {
   try {
-    if (!fs.existsSync(CONFIG_FILE)) {
-      return { KEYWORDS: [], WRITERS: [] };
-    }
+    if (!fs.existsSync(CONFIG_FILE)) return { KEYWORDS: [], WRITERS: [] };
     const raw = fs.readFileSync(CONFIG_FILE, 'utf8');
     return JSON.parse(raw);
   } catch (e) {
@@ -170,14 +166,26 @@ function parseList(html, board) {
     let views = '';
     let date = '';
 
+    // 1차 패스: 날짜와 조회수 먼저 격리
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i];
       if (!views && /^\d+$/.test(line) && line !== seq) { views = line; continue; }
       if (!date && /^\d{4}-\d{2}-\d{2}$/.test(line)) { date = line; continue; }
-      if (line.includes('로그인유지')) continue;
+    }
 
-      if (!writer && /^([\w가-힣]+)$/.test(line) && !line.includes(title) && line !== views && line !== date) {
+    // ⚠️ [초정밀 매칭 알고리즘] 시스템 방해 단어 차단 및 순수 영문+숫자 혼합 ID 필터링
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      
+      // 쓰레기 데이터 및 이미 구한 필드 필터링
+      if (line === title || line === views || line === date || line === seq) continue;
+      if (line.includes('로그인유지') || line.includes('중고장터') || line.includes('댓글')) continue;
+
+      // 바이크셀 아이디 특성: 주로 영문 소문자와 숫자로 구성됨 (가끔 한글 닉네임)
+      // 시스템 단어가 필터링된 상태에서 남은 유효한 문자열을 아이디로 정밀 채택
+      if (/^[a-zA-Z0-9_가-힣]+$/.test(line) && line.length >= 2) {
         writer = line;
+        break; // 정확한 아이디를 찾았으므로 루프 즉시 종료
       }
     }
 
@@ -188,7 +196,7 @@ function parseList(html, board) {
       id,
       board: board.name,
       title,
-      writer: writer || '로그인유지', // 보정 필터 이후 남은 공백은 안전망 처리
+      writer: writer || '아이디확인불가', 
       baseMobileUrl: board.mobileUrl,
       baseDesktopUrl: board.url,
     });
@@ -223,7 +231,6 @@ function parseList(html, board) {
       return;
     }
 
-    // 1. 장터별(Board) 묶음 저장을 위한 딕셔너리 생성
     const groupedData = {};
     BOARDS.forEach(b => { groupedData[b.name] = []; });
 
@@ -257,15 +264,11 @@ function parseList(html, board) {
       }
     }
 
-    // 2. 장터별 순회하며 그룹 메시지 빌드 및 발송
     for (const boardName of Object.keys(groupedData)) {
       const postsInBoard = groupedData[boardName];
       if (postsInBoard.length === 0) continue;
 
-      // 오래된 글이 위로 오게 정렬
       const sortedPosts = postsInBoard.reverse();
-
-      // 메시지 헤더 정의
       const hasWriterMatch = sortedPosts.some(p => p.matchType === 'WRITER_MATCH');
       const mainIcon = hasWriterMatch ? '🚨🚨' : '📦';
       const globalReason = sortedPosts[0].matchType === 'PERIODIC' ? '🕒 정기검색 결과' : '✨ 필터 매칭 결과';
@@ -275,7 +278,6 @@ function parseList(html, board) {
         `━━━━━━━━━━━━━━━━━━`
       ];
 
-      // 본문 리스트 작성
       sortedPosts.forEach((post, index) => {
         const safeTitle = escapeHtml(post.title);
         const safeWriter = escapeHtml(post.writer);
