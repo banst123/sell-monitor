@@ -4,7 +4,6 @@ on:
   # 외부 크론(1시간 주기) 또는 GitHub 웹에서 수동 실행
   workflow_dispatch:
 
-# ⚠️ GitHub Actions 러너가 모든 내부 액션(v4 포함)을 Node.js 24로 강제 구동하도록 설정합니다.
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
@@ -14,23 +13,21 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v4.2.2
 
-      # 전체 알림 전용 독립 캐시 가동 (5분 키워드 캐시와 분리)
       - name: Cache seen posts
-        uses: actions/cache@v4
+        uses: actions/cache@v4.2.0
         with:
           path: seen_posts.json
           key: all-seen-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: |
             all-seen-
 
-      # 실행 직전 필터 설정 파일을 강제로 삭제하여 모든 글을 전송하도록 유도
       - name: Remove filter config for full monitoring
         run: rm -f filter_config.json
 
       - name: Use Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v4.2.0
         with:
           node-version: 24
 
