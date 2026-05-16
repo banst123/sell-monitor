@@ -167,31 +167,24 @@ function escapeHtml(text) {
     .replace(/>/g, '&gt;');
 }
 
-// [완벽 개조] 행(tr) 단위로 쪼갠 뒤 오직 순수 제목 태그에서만 링크를 추출하는 정밀 파서
 function parseList(html, board) {
   const $ = cheerio.load(html);
   const results = [];
 
-  // 바이크셀의 모든 게시글 목록 테이블 행(tr)을 순회합니다.
   $('tr').each((_, tr) => {
     const $tr = $(tr);
-    
-    // 행 내부에서 content.asp 링크를 가진 a 태그들을 찾습니다.
     const $links = $tr.find('a[href*="content.asp"]');
     if ($links.length === 0) return;
 
-    // [핵심 교정] 동일 tr 내에 링크가 여러 개(이미지, 아이콘 등) 있을 경우, 
-    // 실제 '글 제목 텍스트'를 품고 있는 온전한 제목 태그 하나만 정밀 필터링합니다.
     let $titleLink = null;
     $links.each((_, a) => {
       const $a = $(a);
       const href = $a.attr('href') || '';
       const text = $a.text().trim();
       
-      // 장바구니 링크 제외 및 텍스트가 채워져 있는 본문 제목용 태그 선정
       if (!href.includes('WatchList.asp') && text.length > 1) {
         $titleLink = $a;
-        return false; // 매칭되는 진짜 제목 링크를 찾았으므로 루프 조기 종료
+        return false;
       }
     });
 
@@ -202,17 +195,14 @@ function parseList(html, board) {
     if (!seqMatch) return;
     const seq = seqMatch[1];
 
-    // 해당 행(tr)의 전체 텍스트 라인 분할 파싱
     const containerText = $tr.text() || '';
     const lines = containerText.split('\n').map(s => s.trim()).filter(s => s.length > 0);
 
-    // 제목 및 댓글수 제거 가공
     let title = $titleLink.text().replace(/\s+/g, ' ').trim();
     title = title.replace(/\[\s*\d+\s*\]$/, '').trim();
 
     if (!title) return;
 
-    // 행 내부 데이터에서 작성자 파싱 추출
     let writer = '';
     let views = '';
     let date = '';
@@ -235,7 +225,6 @@ function parseList(html, board) {
 
     const id = `seq=${seq}`;
 
-    // 행 내부 파싱이므로 중복 등록 방지 처리
     if (results.some(p => p.id === id)) return;
 
     results.push({
@@ -273,10 +262,6 @@ function parseList(html, board) {
       const posts = parseList(html, board);
       console.log(`[INFO] ${board.name} 파싱 성공: 총 ${posts.length}개 항목 추출됨`);
 
-      if (posts.length > 0) {
-        console.log(`  └─ [파싱샘플 1] 제목: "${posts[0].title}" | 작성자: "${posts[0].writer}"`);
-      }
-
       for (const post of posts) {
         if (!seen.has(post.id)) {
           newPosts.push(post);
@@ -293,8 +278,11 @@ function parseList(html, board) {
       return;
     }
 
-    console.log('\n[DEBUG] --- 필터링 조건 검사 시작 ---');
-    const filteredPosts = uniquePosts.filter((post) => {
+    console.log('\n[DEBUG] --- 필터링 조건 및 매칭 태그 생성 시작 ---');
+    
+    const finalDispatchPosts = [];
+
+    for (const post of uniquePosts) {
       const titleLower = post.title.toLowerCase();
       const writerLower = (post.writer || '').toLowerCase();
 
@@ -304,39 +292,59 @@ function parseList(html, board) {
       const hasKeywords = keywords.length > 0;
       const hasWriters = writers.length > 0;
 
+      // 1. 키워드와 작성자 조건이 모두 없을 때 -> 전체 수집 모드이므로 무조건 통과 (정기검색)
       if (!hasKeywords && !hasWriters) {
-        return true; 
+        post.matchReason = '🕒 정기검색 결과';
+        finalDispatchPosts.push(post);
+        continue;
       }
 
-      const keywordMatches = hasKeywords && keywords.some((kw) => titleLower.includes(kw.toLowerCase()));
-      const writerMatches = hasWriters && writers.some((wr) => writerLower.includes(wr.toLowerCase()));
+      // 2. 일치한 타겟 정보 추적 변수
+      let matchedKeyword = '';
+      let matchedWriter = '';
 
-      const isMatch = keywordMatches || writerMatches;
-      
-      if (isMatch) {
-        console.log(`  [매칭성공] 제목: "${post.title}" | 작성자: "${post.writer}"`);
+      if (hasKeywords) {
+        const found = keywords.find((kw) => titleLower.includes(kw.toLowerCase()));
+        if (found) matchedKeyword = found;
+      }
+
+      if (hasWriters) {
+        const found = writers.find((wr) => writerLower.includes(wr.toLowerCase()));
+        if (found) matchedWriter = found;
+      }
+
+      // 3. 매칭 사유에 맞춰 타이틀 태그 부여
+      if (matchedKeyword && matchedWriter) {
+        post.matchReason = `✨ 대박! 키워드&게시자 동시 일치 (${matchedKeyword} / ${matchedWriter})`;
+        finalDispatchPosts.push(post);
+      } else if (matchedKeyword) {
+        post.matchReason = `✨ 키워드 일치! (${matchedKeyword})`;
+        finalDispatchPosts.push(post);
+      } else if (matchedWriter) {
+        post.matchReason = `👤 지정 게시자 발견! (${matchedWriter})`;
+        finalDispatchPosts.push(post);
       } else {
         console.log(`  [매칭실패] 제목: "${post.title}" | 작성자: "${post.writer}"`);
       }
-
-      return isMatch;
-    });
+    }
     console.log('[DEBUG] --- 필터링 조건 검사 종료 ---\n');
 
-    if (filteredPosts.length === 0) {
+    if (finalDispatchPosts.length === 0) {
       console.log('[INFO] 새 글은 감지되었으나 설정한 키워드/게시자 조건에 걸리는 글이 단 하나도 없습니다.');
       saveSeenIds(newSeen);
       return;
     }
 
-    const finalDispatchPosts = filteredPosts.reverse();
+    // 시간 순서 정렬 (오래된 글부터 전송)
+    const sortedDispatchPosts = finalDispatchPosts.reverse();
 
-    console.log(`[INFO] 최종 필터를 통과한 새 글 ${finalDispatchPosts.length}개 발견, 텔레그램 전송을 실행합니다.`);
+    console.log(`[INFO] 최종 발송 대상 새 글 ${sortedDispatchPosts.length}개 발견, 텔레그램 전송을 실행합니다.`);
 
-    for (const post of finalDispatchPosts) {
+    for (const post of sortedDispatchPosts) {
       const safeTitle = escapeHtml(post.title);
       const safeWriter = escapeHtml(post.writer || '(미상)');
       const safeBoard = escapeHtml(post.board);
+      const safeReason = escapeHtml(post.matchReason);
 
       const seqMatch = post.id.match(/seq=(\d+)/);
       const seq = seqMatch ? seqMatch[1] : '';
@@ -349,15 +357,16 @@ function parseList(html, board) {
         finalDesktopUrl = post.baseDesktopUrl.replace('list.asp', 'content.asp') + `&dolseq=${seq}`;
       }
 
+      // [핵심 교정] 첫 줄에 매칭 사유(이유)를 동적으로 삽입
       const text =
-        `[${safeBoard}] 조건 일치 글 발견!\n` +
+        `[${safeBoard}] ${safeReason}\n` +
         `제목: <b>${safeTitle}</b>\n` +
         `작성자: ${safeWriter}\n` +
         `🔗 <b>링크:</b> <a href="${finalMobileUrl}">[📱 모바일 보기]</a> | <a href="${finalDesktopUrl}">[💻 PC 보기]</a>`;
 
       try {
         await sendTelegramMessage(text);
-        console.log(`  [OK] 전송완료 -> 제목: ${post.title}\n    └─ 모바일: ${finalMobileUrl}\n    └─ 데스크탑: ${finalDesktopUrl}`);
+        console.log(`  [OK] 전송완료 -> 사유: ${post.matchReason} | 제목: ${post.title}`);
       } catch (e) {
         console.error(`  [ERROR] 전송실패 -> 제목: (${post.title}):`, e.message);
       }
