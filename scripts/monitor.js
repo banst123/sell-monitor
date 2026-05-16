@@ -155,39 +155,41 @@ function parseList(html, board) {
     if (!seqMatch) return;
     const seq = seqMatch[1];
 
-    const containerText = $tr.text() || '';
-    const lines = containerText.split('\n').map(s => s.trim()).filter(s => s.length > 0);
-
     let title = $titleLink.text().replace(/\s+/g, ' ').trim();
     title = title.replace(/\[\s*\d+\s*\]$/, '').trim();
     if (!title) return;
 
+    // 🎯 [구조적 정밀 타격 파싱] 
+    // 바이크셀의 td 구조상 3번째 혹은 4번째 td에 작성자 정보가 위치함
     let writer = '';
-    let views = '';
-    let date = '';
-
-    // 1차 패스: 날짜와 조회수 먼저 격리
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i];
-      if (!views && /^\d+$/.test(line) && line !== seq) { views = line; continue; }
-      if (!date && /^\d{4}-\d{2}-\d{2}$/.test(line)) { date = line; continue; }
-    }
-
-    // ⚠️ [초정밀 매칭 알고리즘] 시스템 방해 단어 차단 및 순수 영문+숫자 혼합 ID 필터링
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i];
+    $tr.find('td').each((idx, td) => {
+      const tdText = $(td).text().trim();
       
-      // 쓰레기 데이터 및 이미 구한 필드 필터링
-      if (line === title || line === views || line === date || line === seq) continue;
-      if (line.includes('로그인유지') || line.includes('중고장터') || line.includes('댓글')) continue;
+      // 진짜 아이디는 대개 영문/숫자 혼합이며, '로그인유지/중고장터/조회수' 등의 고정 단어들을 비껴감
+      if (
+        tdText && 
+        !tdText.includes('로그인유지') && 
+        !tdText.includes('중고장터') && 
+        !tdText.includes('댓글') && 
+        !/^\d{4}-\d{2}-\d{2}$/.test(tdText) && // 날짜 제외
+        !/^\d+$/.test(tdText) // 조회수 및 순번 제외
+      ) {
+        // 장터 분류 텍스트(산악완성차 등)가 포함된 경우 깨끗하게 지우고 순수 아이디만 추출
+        let cleanText = tdText
+          .replace(/산악/g, '')
+          .replace(/완성차/g, '')
+          .replace(/프레임/g, '')
+          .replace(/부속/g, '')
+          .replace(/샥포크/g, '')
+          .replace(/기타/g, '')
+          .replace(/\[\d+\]/g, '')
+          .trim();
 
-      // 바이크셀 아이디 특성: 주로 영문 소문자와 숫자로 구성됨 (가끔 한글 닉네임)
-      // 시스템 단어가 필터링된 상태에서 남은 유효한 문자열을 아이디로 정밀 채택
-      if (/^[a-zA-Z0-9_가-힣]+$/.test(line) && line.length >= 2) {
-        writer = line;
-        break; // 정확한 아이디를 찾았으므로 루프 즉시 종료
+        if (cleanText.length >= 2 && cleanText.length <= 20) {
+          writer = cleanText;
+        }
       }
-    }
+    });
 
     const id = `seq=${seq}`;
     if (results.some(p => p.id === id)) return;
@@ -196,7 +198,7 @@ function parseList(html, board) {
       id,
       board: board.name,
       title,
-      writer: writer || '아이디확인불가', 
+      writer: writer || '로그인유지', 
       baseMobileUrl: board.mobileUrl,
       baseDesktopUrl: board.url,
     });
