@@ -134,6 +134,8 @@ function parseList(html, board) {
 
   $('tr').each((_, tr) => {
     const $tr = $(tr);
+    
+    // 1. 게시글 링크 및 고유 번호(seq) 찾기
     const $links = $tr.find('a[href*="content.asp"]');
     if ($links.length === 0) return;
 
@@ -155,41 +157,63 @@ function parseList(html, board) {
     if (!seqMatch) return;
     const seq = seqMatch[1];
 
+    // 2. 제목 깔끔하게 정제 (댓글 수 꼬리표 삭제)
     let title = $titleLink.text().replace(/\s+/g, ' ').trim();
     title = title.replace(/\[\s*\d+\s*\]$/, '').trim();
     if (!title) return;
 
-    // 🎯 [구조적 정밀 타격 파싱] 
-    // 바이크셀의 td 구조상 3번째 혹은 4번째 td에 작성자 정보가 위치함
+    // 🎯 3. [완벽 치트키] 작성자 아이디 정밀 타격 로직
     let writer = '';
-    $tr.find('td').each((idx, td) => {
-      const tdText = $(td).text().trim();
-      
-      // 진짜 아이디는 대개 영문/숫자 혼합이며, '로그인유지/중고장터/조회수' 등의 고정 단어들을 비껴감
-      if (
-        tdText && 
-        !tdText.includes('로그인유지') && 
-        !tdText.includes('중고장터') && 
-        !tdText.includes('댓글') && 
-        !/^\d{4}-\d{2}-\d{2}$/.test(tdText) && // 날짜 제외
-        !/^\d+$/.test(tdText) // 조회수 및 순번 제외
-      ) {
-        // 장터 분류 텍스트(산악완성차 등)가 포함된 경우 깨끗하게 지우고 순수 아이디만 추출
-        let cleanText = tdText
-          .replace(/산악/g, '')
-          .replace(/완성차/g, '')
-          .replace(/프레임/g, '')
-          .replace(/부속/g, '')
-          .replace(/샥포크/g, '')
-          .replace(/기타/g, '')
-          .replace(/\[\d+\]/g, '')
-          .trim();
 
-        if (cleanText.length >= 2 && cleanText.length <= 20) {
-          writer = cleanText;
-        }
+    // 바이크셀의 회원 아이디 링크 전용 시그니처 검색 (예: 멤버메뉴 클릭 팝업 링크 등)
+    const $writerLink = $tr.find('a[href*="member"], a[href*="menu"], span[class*="writer"], td[onclick*="member"]');
+    if ($writerLink.length > 0) {
+      const rawText = $writerLink.text().replace(/로그인유지/g, '').trim();
+      if (rawText && !/^\d+$/.test(rawText) && rawText.length >= 2) {
+        writer = rawText;
       }
-    });
+    }
+
+    // 만약 위 링크로 잡히지 않는 특수 케이스라면 특정 td 영역 한정 추적
+    if (!writer) {
+      $tr.find('td').each((idx, td) => {
+        const $td = $(td);
+        const htmlContent = $td.html() || '';
+        
+        // 텍스트가 아닌 태그 속성 내부에 숨겨진 진짜 아이디를 정규식으로 기습 추출
+        // 비회원 노출용 스크립트 파라미터나 닉네임 속성값 매칭
+        const idMatch = htmlContent.match(/['"‘“]([a-zA-Z0-9_]{4,15})['"’”]/);
+        if (idMatch && !htmlContent.includes('content.asp') && !htmlContent.includes('WatchList.asp')) {
+          const candidate = idMatch[1];
+          if (!['window', 'blank', 'center', 'market', 'click', 'true', 'false'].includes(candidate.toLowerCase())) {
+            writer = candidate;
+            return false;
+          }
+        }
+        
+        // 정규식도 안 통하면 시스템 방해어와 숫자가 완전히 배제된 순수 텍스트 칸 도려내기
+        const txt = $td.text().trim();
+        if (
+          txt &&
+          txt !== title &&
+          !txt.includes('로그인유지') &&
+          !txt.includes('중고장터') &&
+          !txt.includes('댓글') &&
+          !txt.includes('산악') &&
+          !/^\d{4}-\d{2}-\d{2}$/.test(txt) &&
+          !/^\d+$/.test(txt) &&
+          txt.length >= 2 &&
+          txt.length <= 15
+        ) {
+          writer = txt;
+        }
+      });
+    }
+
+    // 모든 수단을 동원해도 못 구한 아주 예외적인 경우에만 기본값 처리
+    if (!writer || writer.includes('[') || writer === title) {
+      writer = '확인불가(비회원)';
+    }
 
     const id = `seq=${seq}`;
     if (results.some(p => p.id === id)) return;
@@ -198,7 +222,7 @@ function parseList(html, board) {
       id,
       board: board.name,
       title,
-      writer: writer || '로그인유지', 
+      writer, 
       baseMobileUrl: board.mobileUrl,
       baseDesktopUrl: board.url,
     });
