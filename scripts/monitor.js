@@ -125,7 +125,7 @@ function sendTelegramMessage(text) {
       chat_id: CHAT_ID,
       text,
       parse_mode: 'HTML',
-      disable_web_page_preview: false,
+      disable_web_page_preview: true, // 기기별 주소가 연속으로 들어가므로 링크 미리보기 팝업은 깔끔하게 차단합니다.
     });
 
     const options = {
@@ -179,11 +179,9 @@ function escapeHtml(text) {
     .replace(/>/g, '&gt;');
 }
 
-// [핵심 갱신] 링크 누락 문제를 완벽하게 해결한 텍스트-A태그 매핑 파서
 function parseList(html, board) {
   const $ = cheerio.load(html);
   
-  // 페이지 내의 모든 유효한 상세페이지 링크 링크를 순서대로 수집합니다.
   const validLinks = [];
   $('a[href*="content.asp"]').each((_, a) => {
     const href = $(a).attr('href') || '';
@@ -225,10 +223,8 @@ function parseList(html, board) {
     const dateMatch = dateLine.match(/^(\d{4}-\d{2}-\d{2})$/);
     const date = dateMatch ? dateMatch[1] : '';
 
-    // 유효한 행 구조(조회수, 작성자, 날짜 세트)가 발견되면 매칭되는 링크를 부여합니다.
     if (!views || !writer || !date) continue;
 
-    // 수집해 둔 고유 링크 목록에서 순서대로 매칭 (누락 방지 핵심 장치)
     const href = validLinks[linkIndex] || '';
     linkIndex++;
 
@@ -236,22 +232,13 @@ function parseList(html, board) {
 
     const id = normalizeId(href);
 
-    let url;
-    try {
-      url = new URL(href, 'https://www.bikesell.co.kr/site/board/').toString();
-    } catch {
-      url = 'https://www.bikesell.co.kr';
-    }
-
     results.push({
       id,
       board: board.name,
       title,
       writer,
-      url,
-      views,
-      date,
-      mobileUrl: board.mobileUrl,
+      baseMobileUrl: board.mobileUrl,
+      baseDesktopUrl: board.url,
     });
   }
 
@@ -336,7 +323,6 @@ function parseList(html, board) {
       return;
     }
 
-    // [발송순서 갱신] 최상단 게시글이 무조건 '가장 마지막(최종)'에 알림 오도록 배열 순서 뒤집기
     const finalDispatchPosts = filteredPosts.reverse();
 
     console.log(`[INFO] 최종 필터를 통과한 새 글 ${finalDispatchPosts.length}개 발견, 텔레그램 전송을 실행합니다.`);
@@ -346,23 +332,29 @@ function parseList(html, board) {
       const safeWriter = escapeHtml(post.writer || '(미상)');
       const safeBoard = escapeHtml(post.board);
 
-      // [모바일 링크 갱신] 고유 일련번호(seq) 숫자만 추출하여 정확한 모바일 상세 보기 주소 빌드
+      // 고유 일련번호(seq) 추출
       const seqMatch = post.id.match(/seq=(\d+)/);
       const seq = seqMatch ? seqMatch[1] : '';
 
-      let finalMobileUrl = post.mobileUrl;
+      // [핵심 기능] 모바일용과 PC용 상세페이지(content.asp) 주소를 각각 조립합니다.
+      let finalMobileUrl = 'https://bikesell.co.kr';
+      let finalDesktopUrl = 'https://bikesell.co.kr';
+
       if (seq) {
-        finalMobileUrl = post.mobileUrl.replace('list.asp', 'content.asp') + `&dolseq=${seq}`;
+        finalMobileUrl = post.baseMobileUrl.replace('list.asp', 'content.asp') + `&dolseq=${seq}`;
+        finalDesktopUrl = post.baseDesktopUrl.replace('list.asp', 'content.asp') + `&dolseq=${seq}`;
       }
 
+      // 텔레그램 메시지 포맷팅: 기기별 링크 분할 매핑
       const text =
         `[${safeBoard}] 조건 일치 글 발견!\n` +
-        `제목: <b><a href="${finalMobileUrl}">${safeTitle}</a></b>\n` +
-        `작성자: ${safeWriter}`;
+        `제목: <b>${safeTitle}</b>\n` +
+        `작성자: ${safeWriter}\n` +
+        `🔗 <b>링크:</b> <a href="${finalMobileUrl}">[📱 모바일 보기]</a> | <a href="${finalDesktopUrl}">[💻 PC 보기]</a>`;
 
       try {
         await sendTelegramMessage(text);
-        console.log(`  [OK] 전송완료 -> 제목: ${post.title} | 링크: ${finalMobileUrl}`);
+        console.log(`  [OK] 전송완료 -> 제목: ${post.title}\n    └─ 모바일: ${finalMobileUrl}\n    └─ 데스크탑: ${finalDesktopUrl}`);
       } catch (e) {
         console.error(`  [ERROR] 전송실패 -> 제목: (${post.title}):`, e.message);
       }
