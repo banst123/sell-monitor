@@ -4,6 +4,10 @@ on:
   # 외부 크론(5분 주기) 또는 GitHub 웹에서 수동 실행
   workflow_dispatch:
 
+# ⚠️ GitHub Actions 러너가 모든 내부 액션(v4 포함)을 Node.js 24로 강제 구동하도록 설정합니다.
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   monitor:
     runs-on: ubuntu-latest
