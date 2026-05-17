@@ -131,13 +131,10 @@ function escapeHtml(text) {
 function parseList(html, board) {
   const $ = cheerio.load(html);
   const results = [];
-  
   const $trs = $('tr');
-  console.log(`   └ [파싱] 총 ${$trs.length}개의 행(tr) 발견. 데이터 분석...`);
 
   $trs.each((_, tr) => {
     const $tr = $(tr);
-    
     const $links = $tr.find('a[href*="content.asp"]');
     if ($links.length === 0) return;
 
@@ -155,9 +152,10 @@ function parseList(html, board) {
     if (!$titleLink) return;
 
     const href = $titleLink.attr('href') || '';
-    const seqMatch = href.match(/seq=(\d+)/) || href.match(/no=(\d+)/);
+    const seqMatch = href.match(/(?:seq|no|dolseq)=(\d+)/i);
     if (!seqMatch) return;
-    const seq = seqMatch[1];
+    const seq = seqMatch[1]; 
+    const id = `${board.name}_${seq}`; 
 
     let title = $titleLink.text().replace(/\s+/g, ' ').trim();
     title = title.replace(/\[\s*\d+\s*\]$/, '').trim();
@@ -170,24 +168,19 @@ function parseList(html, board) {
     
     if (dateMatch && dateMatch[1]) {
       let rawWriter = dateMatch[1].trim();
-      
-      // 조회수 숫자가 닉네임 앞에 붙어있는 현상 정제 (\d+ 떼어내기)
       if (/^\d+[a-zA-Z가-힣]/.test(rawWriter)) {
         rawWriter = rawWriter.replace(/^\d+/, ''); 
       }
-
       if (!/중고|장터|산악|완성차|부속|부품|댓글|공지|조회|추천|id|pass/i.test(rawWriter) && rawWriter.length <= 16) {
         writer = rawWriter;
       }
     }
 
-    const id = `seq=${seq}`;
     if (results.some(p => p.id === id)) return;
-
-    console.log(`      -> [추출] ID: ${id} | 제목: ${title.slice(0, 15)}... | 작성자: ${writer}`);
 
     results.push({
       id,
+      seq,
       board: board.name,
       title,
       writer, 
@@ -201,7 +194,7 @@ function parseList(html, board) {
 
 (async () => {
   console.log('====================================================');
-  console.log('[START] 바이크셀 중고장터 모니터링 프로세스 구동');
+  console.log('[START] 바이크셀 지정 게시자 강조 알림 스크립트 구동');
   console.log('====================================================');
 
   const seen = loadSeenIds();
@@ -211,20 +204,13 @@ function parseList(html, board) {
 
   try {
     for (const board of BOARDS) {
-      console.log(`\n[진입] 장터 접속 중: ${board.name}`);
+      console.log(`[스캔] ${board.name} 데이터 로드 중...`);
       let html;
-      try { 
-        html = await httpGet(board.url); 
-      } catch (e) { 
-        console.error(`   └ [실패] 데이터를 가져오지 못했습니다: ${e.message}`);
-        continue; 
-      }
+      try { html = await httpGet(board.url); } catch (e) { continue; }
 
       const posts = parseList(html, board);
-
       for (const post of posts) {
         if (!newSeen.has(post.id)) {
-          console.log(`      [★신규발견] ID: ${post.id}, 제목: ${post.title}`);
           newPosts.push(post);
           newSeen.add(post.id); 
         }
@@ -232,7 +218,7 @@ function parseList(html, board) {
     }
 
     if (newPosts.length === 0) {
-      console.log('\n[INFO] 새로 등록된 게시글이 없어 모니터링을 종료합니다.');
+      console.log('[INFO] 알림 대기 중인 새 글이 없습니다.');
       return;
     }
 
@@ -241,31 +227,29 @@ function parseList(html, board) {
     const groupedData = {};
     BOARDS.forEach(b => { groupedData[b.name] = []; });
 
-    // 유니크 처리 및 필터 매칭 진행 (웹사이트에 나온 순서 그대로 유지)
     const uniquePosts = Array.from(new Map(newPosts.map((p) => [p.id, p])).values());
 
     for (const post of uniquePosts) {
       const titleLower = post.title.toLowerCase();
-      const writerLower = post.writer.toLowerCase();
+      const writerLower = post.writer.toLowerCase().trim();
 
       const keywords = Array.isArray(FILTER_CONFIG.KEYWORDS) ? FILTER_CONFIG.KEYWORDS : [];
       const writers = Array.isArray(FILTER_CONFIG.WRITERS) ? FILTER_CONFIG.WRITERS : [];
 
-      const hasFilters = keywords.length > 0 || writers.length > 0;
-
-      if (!hasFilters) {
+      if (keywords.length === 0 && writers.length === 0) {
         post.matchType = 'PERIODIC';
         post.matchReason = '정기 스캔';
         if (groupedData[post.board]) groupedData[post.board].push(post);
         continue;
       }
 
-      let matchedWriter = writers.find((wr) => writerLower.includes(wr.toLowerCase()));
+      // 🎯 작성자 매칭 정확도 향상 (양끝 공백 제거 및 소문자 정밀 비교)
+      let matchedWriter = writers.find((wr) => writerLower.includes(wr.toLowerCase().trim()));
       let matchedKeyword = keywords.find((kw) => titleLower.includes(kw.toLowerCase()));
 
       if (matchedWriter) {
         post.matchType = 'WRITER_MATCH';
-        post.matchReason = `지정게시자 [${matchedWriter}]`;
+        post.matchReason = `✨지정게시자 적중 [${matchedWriter}]`;
         if (groupedData[post.board]) groupedData[post.board].push(post);
       } else if (matchedKeyword) {
         post.matchType = 'KEYWORD_MATCH';
@@ -274,18 +258,18 @@ function parseList(html, board) {
       }
     }
 
-    console.log('\n[알림단계] 텔레그램 메시지 발송 개시...');
     for (const boardName of Object.keys(groupedData)) {
       const postsInBoard = groupedData[boardName];
       if (postsInBoard.length === 0) continue;
 
-      // 🎯 [정렬 수정] 기존의 .reverse() 제거하여 최신 글이 알림창 맨 위(1번)에 오도록 고정
+      // 🎯 지정 게시자 포함 여부 체크해서 상단 대문 타이틀 분기 조절
       const hasWriterMatch = postsInBoard.some(p => p.matchType === 'WRITER_MATCH');
-      const mainIcon = hasWriterMatch ? '🚨🚨' : '📦';
-      const globalReason = postsInBoard[0].matchType === 'PERIODIC' ? '🕒 정기검색 결과' : '✨ 필터 매칭 결과';
+      
+      const mainHeaderIcon = hasWriterMatch ? '🚨🚨🚨 [특이게시자 등판] 🚨🚨🚨\n⚡' : '📦';
+      const globalReason = postsInBoard[0].matchType === 'PERIODIC' ? '🕒 정기 결과' : '✨ 필터 결과';
       
       const localMessageLines = [
-        `${mainIcon} <b>[${escapeHtml(boardName)}]</b> ${globalReason} (총 ${postsInBoard.length}건)`,
+        `${mainHeaderIcon} <b>[${escapeHtml(boardName)}]</b> ${globalReason} (총 ${postsInBoard.length}건)`,
         `━━━━━━━━━━━━━━━━━━`
       ];
 
@@ -296,25 +280,35 @@ function parseList(html, board) {
         const displayWriter = escapeHtml(currentPost.writer); 
         const displayReason = escapeHtml(currentPost.matchReason);
         
-        const seqMatch = currentPost.id.match(/seq=(\d+)/);
-        const seq = seqMatch ? seqMatch[1] : '';
-
+        const seq = currentPost.seq;
         let mobileUrl = 'https://bikesell.co.kr';
         let desktopUrl = 'https://bikesell.co.kr';
+        
         if (seq) {
           mobileUrl = currentPost.baseMobileUrl.replace('list.asp', 'content.asp') + `&dolseq=${seq}`;
           desktopUrl = currentPost.baseDesktopUrl.replace('list.asp', 'content.asp') + `&dolseq=${seq}`;
         }
 
-        const writerAlert = currentPost.matchType === 'WRITER_MATCH' ? ' 🚨[특이게시자]' : '';
         const simpleIdx = `${i + 1}.`;
 
-        localMessageLines.push(
-          `<b>${simpleIdx} ${displayTitle}</b>${writerAlert}`,
-          `👤 작성자: <code>${displayWriter}</code>`,
-          `🛠️ 디버그: <i>${displayReason} (ID: ${currentPost.id})</i>`,
-          `🔗 링크: <a href="${mobileUrl}">[📱모바일]</a> / <a href="${desktopUrl}">[💻PC]</a>\n`
-        );
+        // 🎯 본문 리스트 아이템 디자인 차별화 패치
+        if (currentPost.matchType === 'WRITER_MATCH') {
+          // 지정 게시자인 경우 불타는 아이콘과 주황색 강조 코드로 한눈에 띄게 배치
+          localMessageLines.push(
+            `🔥 <b>${simpleIdx} ${displayTitle}</b>`,
+            `👤 <b>지정 판매자 발견: <code>${displayWriter}</code></b>`,
+            `🎯 <i>필터 근거: ${displayReason}</i>`,
+            `🔗 링크: <a href="${mobileUrl}">[📱모바일]</a> / <a href="${desktopUrl}">[💻PC]</a>\n`
+          );
+        } else {
+          // 일반 키워드 매칭인 경우 기존 레이아웃 유지
+          localMessageLines.push(
+            `📦 <b>${simpleIdx} ${displayTitle}</b>`,
+            `👤 작성자: <code>${displayWriter}</code>`,
+            `🛠️ 필터: <i>${displayReason}</i>`,
+            `🔗 링크: <a href="${mobileUrl}">[📱모바일]</a> / <a href="${desktopUrl}">[💻PC]</a>\n`
+          );
+        }
       }
 
       localMessageLines.push(`━━━━━━━━━━━━━━━━━━`);
@@ -322,15 +316,15 @@ function parseList(html, board) {
 
       try {
         await sendTelegramMessage(finalCombinedText);
-        console.log(`   [OK] 텔레그램 발송 완료 -> ${boardName} (${postsInBoard.length}건)`);
+        console.log(`   [OK] 텔레그램 발송 완료 -> ${boardName}`);
       } catch (e) {
-        console.error(`   [ERROR] 텔레그램 발송 실패 -> ${boardName}:`, e.message);
+        console.error(`   [ERROR] 발송 오류:`, e.message);
       }
     }
-    console.log('\n[FINISH] 프로세스 정상 종료.');
+    console.log('\n[FINISH] 모니터링 완료.');
 
   } catch (e) {
-    console.error('[FATAL] 에러 발생:', e);
+    console.error('[FATAL] 에러:', e);
     process.exit(1);
   }
 })();
