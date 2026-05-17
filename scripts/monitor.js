@@ -19,7 +19,6 @@ if (!TOKEN || !CHAT_ID) {
   process.exit(1);
 }
 
-// 게시판 목록 명칭 최신화 완료 (전기자전거 부품장터 반영)
 const BOARDS = [
   {
     name: '산악완성차 중고장터',
@@ -165,30 +164,32 @@ function parseList(html, board) {
     const $tds = $tr.find('td');
 
     if ($tds.length >= 4) {
-      const targetIndices = [2, 3]; 
+      const targetIndices = [2, 3, 4]; // 🎯 안정성을 위해 탐색 범위를 살짝 넓힘
       
       for (const idx of targetIndices) {
         const $td = $($tds[idx]);
-        let txt = $td.text().replace(/로그인유지/g, '').replace(/\s+/g, '').trim();
-
-        if (!txt || /^\d+$/.test(txt) || /^\d{4}-\d{2}-\d{2}$/.test(txt)) continue;
+        if (!$td.length) continue;
         
-        // 🎯 [최종 방어벽 수정] ID, PASS, 로그인 관련 유령 텍스트를 대소문자 무시(i)하고 원천 차단
-        if (/중고|장터|산악|완성차|부속|부품|댓글|공지|조회|추천|id|pass|로그인|비밀번호|회원/i.test(txt)) continue;
-        if (txt.includes('[') || txt.includes(']')) continue;
+        let txt = $td.text().replace(/로그인유지/g, '').replace(/\s+/g, ' ').trim();
+
+        if (!txt || /^\d+$/.test(txt.replace(/-/g, ''))) continue;
+        
+        // 완전히 로그인 폼 양식인 문자열만 정밀 타격 제거 (단순 id가 포함된 닉네임은 생존)
+        if (txt.includes('ID :') || txt.includes('PASS :') || /중고장터|확인불가/i.test(txt)) continue;
 
         const hasMemberClick = $td.html().includes('onclick') || $td.find('a, span').attr('onclick');
 
-        if (txt.length >= 2 && txt.length <= 16) {
-          writer = $td.text().replace(/로그인유지/g, '').trim();
+        if (txt.length >= 2 && txt.length <= 20) {
+          writer = txt;
           if (hasMemberClick) break; 
         }
       }
     }
 
-    // 작성자가 유령 데이터일 경우 수집 단계에서 즉시 skip
-    if (!writer || /중고장터|확인불가/.test(writer)) {
-      return; 
+    // 🎯 [최종 생존 조치] 작성자가 공백이거나 유령 텍스트로 걸러졌더라도, 
+    // 기존 정상 알림까지 먹통을 만드는 return 대신 일반 기본값을 부여하여 글은 무조건 수집되도록 보완
+    if (!writer || writer.includes('ID :')) {
+      writer = '일반판매자';
     }
 
     const id = `seq=${seq}`;
@@ -234,7 +235,6 @@ function parseList(html, board) {
       return;
     }
 
-    // 알림을 쏘기 전에 완벽하게 파일 저장부터 완료하여 중복 발송 방지
     saveSeenIds(newSeen);
 
     const groupedData = {};
@@ -270,7 +270,6 @@ function parseList(html, board) {
       }
     }
 
-    // 문자 생성 과정 격리 고도화 (변수 오염 원천 차단 루프)
     for (const boardName of Object.keys(groupedData)) {
       const postsInBoard = groupedData[boardName];
       if (postsInBoard.length === 0) continue;
@@ -288,7 +287,6 @@ function parseList(html, board) {
       for (let i = 0; i < sortedPosts.length; i++) {
         const currentPost = sortedPosts[i];
         
-        // 내부 스코프 내 독립 상수로 직렬 바인딩해 전역 오염 방지
         const displayTitle = escapeHtml(currentPost.title);
         const displayWriter = escapeHtml(currentPost.writer); 
         const displayReason = escapeHtml(currentPost.matchReason);
@@ -304,7 +302,7 @@ function parseList(html, board) {
         }
 
         const writerAlert = currentPost.matchType === 'WRITER_MATCH' ? ' 🚨[특이게시자]' : '';
-        const simpleIdx = `${i + 1}.`; // 10번 이상 깨짐 없는 정갈한 순수 숫자 표기법
+        const simpleIdx = `${i + 1}.`;
 
         localMessageLines.push(
           `<b>${simpleIdx} ${displayTitle}</b>${writerAlert}`,
