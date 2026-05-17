@@ -133,9 +133,9 @@ function parseList(html, board) {
   const results = [];
   
   const $trs = $('tr');
-  console.log(`   └ [파싱] 총 ${$trs.length}개의 행(tr) 발견. 데이터 매칭 분석 시작...`);
+  console.log(`   └ [파싱] 총 ${$trs.length}개의 행(tr) 발견. 데이터 분석...`);
 
-  $trs.each((i, tr) => {
+  $trs.each((_, tr) => {
     const $tr = $(tr);
     
     const $links = $tr.find('a[href*="content.asp"]');
@@ -163,7 +163,6 @@ function parseList(html, board) {
     title = title.replace(/\[\s*\d+\s*\]$/, '').trim();
     if (!title) return;
 
-    // 🎯 행 전체 텍스트 추출 디버깅 로그 연동
     let fullRowText = $tr.text().replace(/로그인유지/g, '').replace(/\s+/g, ' ').trim();
 
     let writer = '일반판매자';
@@ -171,6 +170,12 @@ function parseList(html, board) {
     
     if (dateMatch && dateMatch[1]) {
       let rawWriter = dateMatch[1].trim();
+      
+      // 조회수 숫자가 닉네임 앞에 붙어있는 현상 정제 (\d+ 떼어내기)
+      if (/^\d+[a-zA-Z가-힣]/.test(rawWriter)) {
+        rawWriter = rawWriter.replace(/^\d+/, ''); 
+      }
+
       if (!/중고|장터|산악|완성차|부속|부품|댓글|공지|조회|추천|id|pass/i.test(rawWriter) && rawWriter.length <= 16) {
         writer = rawWriter;
       }
@@ -179,8 +184,7 @@ function parseList(html, board) {
     const id = `seq=${seq}`;
     if (results.some(p => p.id === id)) return;
 
-    // 추출과정 한줄 요약 로그 출력 (원시 텍스트 및 분리 결과 파악용)
-    console.log(`      -> [매칭성공] ID: ${id} | 제목: ${title.slice(0, 15)}... | 추출작성자: ${writer}`);
+    console.log(`      -> [추출] ID: ${id} | 제목: ${title.slice(0, 15)}... | 작성자: ${writer}`);
 
     results.push({
       id,
@@ -192,34 +196,27 @@ function parseList(html, board) {
     });
   });
 
-  console.log(`   └ [완료] ${board.name} 유효 게시글 추출 완료 (총 ${results.length}건)`);
   return results;
 }
 
 (async () => {
   console.log('====================================================');
-  console.log('[START] 바이크셀 중고장터 실시간 모니터링 프로세스 구동');
+  console.log('[START] 바이크셀 중고장터 모니터링 프로세스 구동');
   console.log('====================================================');
 
   const seen = loadSeenIds();
-  console.log(`[INIT] 기존에 전송 완료된 게시글 캐시 로드완료: 총 ${seen.size}개`);
-
   const newSeen = new Set(seen);
   const newPosts = [];
   const FILTER_CONFIG = loadFilterConfig();
-  console.log(`[INIT] 필터 설정 로드완료 - 키워드: [${FILTER_CONFIG.KEYWORDS || ''}], 작성자: [${FILTER_CONFIG.WRITERS || ''}]`);
 
   try {
     for (const board of BOARDS) {
       console.log(`\n[진입] 장터 접속 중: ${board.name}`);
-      console.log(`   └ URL: ${board.url}`);
-      
       let html;
       try { 
         html = await httpGet(board.url); 
-        console.log(`   └ [성공] HTML 소스 수신 완료 (${Buffer.byteLength(html)} bytes)`);
       } catch (e) { 
-        console.error(`   └ [실패] 해당 장터 데이터를 가져오지 못했습니다: ${e.message}`);
+        console.error(`   └ [실패] 데이터를 가져오지 못했습니다: ${e.message}`);
         continue; 
       }
 
@@ -227,30 +224,25 @@ function parseList(html, board) {
 
       for (const post of posts) {
         if (!newSeen.has(post.id)) {
-          console.log(`      [★신규발견] 새 게시글 등록 감지 -> ID: ${post.id}, 제목: ${post.title}`);
+          console.log(`      [★신규발견] ID: ${post.id}, 제목: ${post.title}`);
           newPosts.push(post);
           newSeen.add(post.id); 
         }
       }
     }
 
-    console.log('\n====================================================');
-    console.log(`[스캔결과 확인] 새롭게 수집된 전체 신규 게시글 수: 총 ${newPosts.length}건`);
-    console.log('====================================================');
-
-    const uniquePosts = Array.from(new Map(newPosts.map((p) => [p.id, p])).values());
-    
-    if (uniquePosts.length === 0) {
-      console.log('[INFO] 새로 등록된 게시글이 없어 모니터링을 종료합니다.');
+    if (newPosts.length === 0) {
+      console.log('\n[INFO] 새로 등록된 게시글이 없어 모니터링을 종료합니다.');
       return;
     }
 
-    // 파일 저장
     saveSeenIds(newSeen);
-    console.log(`[SYSTEM] 락 파일(seen_posts.json) 갱신 완료.`);
 
     const groupedData = {};
     BOARDS.forEach(b => { groupedData[b.name] = []; });
+
+    // 유니크 처리 및 필터 매칭 진행 (웹사이트에 나온 순서 그대로 유지)
+    const uniquePosts = Array.from(new Map(newPosts.map((p) => [p.id, p])).values());
 
     for (const post of uniquePosts) {
       const titleLower = post.title.toLowerCase();
@@ -263,7 +255,7 @@ function parseList(html, board) {
 
       if (!hasFilters) {
         post.matchType = 'PERIODIC';
-        post.matchReason = '검색 조건 없음 (정기 스캔)';
+        post.matchReason = '정기 스캔';
         if (groupedData[post.board]) groupedData[post.board].push(post);
         continue;
       }
@@ -273,34 +265,32 @@ function parseList(html, board) {
 
       if (matchedWriter) {
         post.matchType = 'WRITER_MATCH';
-        post.matchReason = `지정게시자 필터 감지 [${matchedWriter}]`;
+        post.matchReason = `지정게시자 [${matchedWriter}]`;
         if (groupedData[post.board]) groupedData[post.board].push(post);
-        console.log(`   -> [필터적중] 작성자 일치함: ${post.writer} (${post.title.slice(0,15)}...)`);
       } else if (matchedKeyword) {
         post.matchType = 'KEYWORD_MATCH';
-        post.matchReason = `키워드 필터 감지 [${matchedKeyword}]`;
+        post.matchReason = `키워드 [${matchedKeyword}]`;
         if (groupedData[post.board]) groupedData[post.board].push(post);
-        console.log(`   -> [필터적중] 키워드 포함됨: [${matchedKeyword}] 인지함 (${post.title.slice(0,15)}...)`);
       }
     }
 
-    console.log('\n[알림단계] 텔레그램 메시지 빌드 및 발송 제어 개시...');
+    console.log('\n[알림단계] 텔레그램 메시지 발송 개시...');
     for (const boardName of Object.keys(groupedData)) {
       const postsInBoard = groupedData[boardName];
       if (postsInBoard.length === 0) continue;
 
-      const sortedPosts = postsInBoard.reverse();
-      const hasWriterMatch = sortedPosts.some(p => p.matchType === 'WRITER_MATCH');
+      // 🎯 [정렬 수정] 기존의 .reverse() 제거하여 최신 글이 알림창 맨 위(1번)에 오도록 고정
+      const hasWriterMatch = postsInBoard.some(p => p.matchType === 'WRITER_MATCH');
       const mainIcon = hasWriterMatch ? '🚨🚨' : '📦';
-      const globalReason = sortedPosts[0].matchType === 'PERIODIC' ? '🕒 정기검색 결과' : '✨ 필터 매칭 결과';
+      const globalReason = postsInBoard[0].matchType === 'PERIODIC' ? '🕒 정기검색 결과' : '✨ 필터 매칭 결과';
       
       const localMessageLines = [
-        `${mainIcon} <b>[${escapeHtml(boardName)}]</b> ${globalReason} (총 ${sortedPosts.length}건)`,
+        `${mainIcon} <b>[${escapeHtml(boardName)}]</b> ${globalReason} (총 ${postsInBoard.length}건)`,
         `━━━━━━━━━━━━━━━━━━`
       ];
 
-      for (let i = 0; i < sortedPosts.length; i++) {
-        const currentPost = sortedPosts[i];
+      for (let i = 0; i < postsInBoard.length; i++) {
+        const currentPost = postsInBoard[i];
         
         const displayTitle = escapeHtml(currentPost.title);
         const displayWriter = escapeHtml(currentPost.writer); 
@@ -332,15 +322,15 @@ function parseList(html, board) {
 
       try {
         await sendTelegramMessage(finalCombinedText);
-        console.log(`   [OK] 텔레그램 발송 완료 -> ${boardName} (${sortedPosts.length}건)`);
+        console.log(`   [OK] 텔레그램 발송 완료 -> ${boardName} (${postsInBoard.length}건)`);
       } catch (e) {
-        console.error(`   [ERROR] 텔레그램 발송 누락 -> ${boardName} 에러:`, e.message);
+        console.error(`   [ERROR] 텔레그램 발송 실패 -> ${boardName}:`, e.message);
       }
     }
-    console.log('\n[FINISH] 모니터링 주기 안전하게 완전히 종료되었습니다.');
+    console.log('\n[FINISH] 프로세스 정상 종료.');
 
   } catch (e) {
-    console.error('[FATAL] 모니터링 스크립트 실행 중 치명적 에러 발생:', e);
+    console.error('[FATAL] 에러 발생:', e);
     process.exit(1);
   }
 })();
