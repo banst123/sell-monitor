@@ -19,7 +19,7 @@ if (!TOKEN || !CHAT_ID) {
   process.exit(1);
 }
 
-// 🎯 게시판 목록 명칭 최신화 완료 (전기자전거 부품장터 반영)
+// 게시판 목록 명칭 최신화 완료 (전기자전거 부품장터 반영)
 const BOARDS = [
   {
     name: '산악완성차 중고장터',
@@ -161,7 +161,6 @@ function parseList(html, board) {
     title = title.replace(/\[\s*\d+\s*\]$/, '').trim();
     if (!title) return;
 
-    // 🎯 [정밀 타격 파싱] 인덱스 범위를 2, 3으로 압축하고 오작동하는 title.includes 조건 전면 삭제
     let writer = '';
     const $tds = $tr.find('td');
 
@@ -173,7 +172,9 @@ function parseList(html, board) {
         let txt = $td.text().replace(/로그인유지/g, '').replace(/\s+/g, '').trim();
 
         if (!txt || /^\d+$/.test(txt) || /^\d{4}-\d{2}-\d{2}$/.test(txt)) continue;
-        if (/중고|장터|산악|완성차|부속|부품|댓글|공지|조회|추천/.test(txt)) continue;
+        
+        // 🎯 [최종 방어벽 수정] ID, PASS, 로그인 관련 유령 텍스트를 대소문자 무시(i)하고 원천 차단
+        if (/중고|장터|산악|완성차|부속|부품|댓글|공지|조회|추천|id|pass|로그인|비밀번호|회원/i.test(txt)) continue;
         if (txt.includes('[') || txt.includes(']')) continue;
 
         const hasMemberClick = $td.html().includes('onclick') || $td.find('a, span').attr('onclick');
@@ -185,7 +186,7 @@ function parseList(html, board) {
       }
     }
 
-    // 작성자가 온전하게 수집되지 않은 쓰레기 데이터는 수집 단계에서 즉시 skip
+    // 작성자가 유령 데이터일 경우 수집 단계에서 즉시 skip
     if (!writer || /중고장터|확인불가/.test(writer)) {
       return; 
     }
@@ -233,7 +234,7 @@ function parseList(html, board) {
       return;
     }
 
-    // [중복 방지 실시간 락] 알림을 쏘기 전에 완벽하게 파일 저장부터 완료
+    // 알림을 쏘기 전에 완벽하게 파일 저장부터 완료하여 중복 발송 방지
     saveSeenIds(newSeen);
 
     const groupedData = {};
@@ -269,7 +270,7 @@ function parseList(html, board) {
       }
     }
 
-    // 🎯 [문자 생성 과정 격리 고도화] 전역 변수 오염 원천 차단 루프
+    // 문자 생성 과정 격리 고도화 (변수 오염 원천 차단 루프)
     for (const boardName of Object.keys(groupedData)) {
       const postsInBoard = groupedData[boardName];
       if (postsInBoard.length === 0) continue;
@@ -287,7 +288,7 @@ function parseList(html, board) {
       for (let i = 0; i < sortedPosts.length; i++) {
         const currentPost = sortedPosts[i];
         
-        // 껍데기 변수를 우회하고 내부 스코프 내 독립 상수로 직렬 바인딩해 오염 방지
+        // 내부 스코프 내 독립 상수로 직렬 바인딩해 전역 오염 방지
         const displayTitle = escapeHtml(currentPost.title);
         const displayWriter = escapeHtml(currentPost.writer); 
         const displayReason = escapeHtml(currentPost.matchReason);
@@ -303,12 +304,12 @@ function parseList(html, board) {
         }
 
         const writerAlert = currentPost.matchType === 'WRITER_MATCH' ? ' 🚨[특이게시자]' : '';
-        const simpleIdx = `${i + 1}.`; // 🎯 10번 이상 깨짐 없는 정갈한 순수 숫자 표기법
+        const simpleIdx = `${i + 1}.`; // 10번 이상 깨짐 없는 정갈한 순수 숫자 표기법
 
         localMessageLines.push(
           `<b>${simpleIdx} ${displayTitle}</b>${writerAlert}`,
           `👤 작성자: <code>${displayWriter}</code>`,
-          `🛠️ 디버그: <i>${displayReason} (ID: ${currentPost.id})</i>`, // 🎯 항목별 개별 디버그 로그 추가
+          `🛠️ 디버그: <i>${displayReason} (ID: ${currentPost.id})</i>`,
           `🔗 링크: <a href="${mobileUrl}">[📱모바일]</a> / <a href="${desktopUrl}">[💻PC]</a>\n`
         );
       }
