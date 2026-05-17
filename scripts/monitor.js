@@ -19,6 +19,7 @@ if (!TOKEN || !CHAT_ID) {
   process.exit(1);
 }
 
+// 🎯 게시판 목록 명칭 최신화 완료 (전기자전거 부품장터 반영)
 const BOARDS = [
   {
     name: '산악완성차 중고장터',
@@ -41,7 +42,7 @@ const BOARDS = [
     mobileUrl: 'https://bikesell.co.kr/site/m/list.asp?doltop=MARKET&dolsection=MARKET4',
   },
   {
-    name: '기타 중고장터 24',
+    name: '전기자전거 부품장터',
     url: 'https://bikesell.co.kr/site/board/list.asp?doltop=MARKET&dolsection=MARKET24',
     mobileUrl: 'https://bikesell.co.kr/site/m/list.asp?doltop=MARKET&dolsection=MARKET24',
   },
@@ -52,9 +53,7 @@ const CONFIG_FILE = path.join(__dirname, '..', 'filter_config.json');
 
 function loadSeenIds() {
   try {
-    if (!fs.existsSync(SEEN_FILE)) {
-      return new Set();
-    }
+    if (!fs.existsSync(SEEN_FILE)) return new Set();
     const raw = fs.readFileSync(SEEN_FILE, 'utf8');
     const arr = JSON.parse(raw);
     if (!Array.isArray(arr)) return new Set();
@@ -74,9 +73,7 @@ function saveSeenIds(set) {
 
 function loadFilterConfig() {
   try {
-    if (!fs.existsSync(CONFIG_FILE)) {
-      return { KEYWORDS: [], WRITERS: [] };
-    }
+    if (!fs.existsSync(CONFIG_FILE)) return { KEYWORDS: [], WRITERS: [] };
     const raw = fs.readFileSync(CONFIG_FILE, 'utf8');
     return JSON.parse(raw);
   } catch (e) {
@@ -138,6 +135,7 @@ function parseList(html, board) {
 
   $('tr').each((_, tr) => {
     const $tr = $(tr);
+    
     const $links = $tr.find('a[href*="content.asp"]');
     if ($links.length === 0) return;
 
@@ -159,26 +157,37 @@ function parseList(html, board) {
     if (!seqMatch) return;
     const seq = seqMatch[1];
 
-    const containerText = $tr.text() || '';
-    const lines = containerText.split('\n').map(s => s.trim()).filter(s => s.length > 0);
-
     let title = $titleLink.text().replace(/\s+/g, ' ').trim();
     title = title.replace(/\[\s*\d+\s*\]$/, '').trim();
     if (!title) return;
 
+    // 🎯 [정밀 타격 파싱] 인덱스 범위를 2, 3으로 압축하고 오작동하는 title.includes 조건 전면 삭제
     let writer = '';
-    let views = '';
-    let date = '';
+    const $tds = $tr.find('td');
 
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i];
-      if (!views && /^\d+$/.test(line) && line !== seq) { views = line; continue; }
-      if (!date && /^\d{4}-\d{2}-\d{2}$/.test(line)) { date = line; continue; }
-      if (line.includes('로그인유지')) continue;
+    if ($tds.length >= 4) {
+      const targetIndices = [2, 3]; 
+      
+      for (const idx of targetIndices) {
+        const $td = $($tds[idx]);
+        let txt = $td.text().replace(/로그인유지/g, '').replace(/\s+/g, '').trim();
 
-      if (!writer && /^([\w가-힣]+)$/.test(line) && !line.includes(title) && line !== views && line !== date) {
-        writer = line;
+        if (!txt || /^\d+$/.test(txt) || /^\d{4}-\d{2}-\d{2}$/.test(txt)) continue;
+        if (/중고|장터|산악|완성차|부속|부품|댓글|공지|조회|추천/.test(txt)) continue;
+        if (txt.includes('[') || txt.includes(']')) continue;
+
+        const hasMemberClick = $td.html().includes('onclick') || $td.find('a, span').attr('onclick');
+
+        if (txt.length >= 2 && txt.length <= 16) {
+          writer = $td.text().replace(/로그인유지/g, '').trim();
+          if (hasMemberClick) break; 
+        }
       }
+    }
+
+    // 작성자가 온전하게 수집되지 않은 쓰레기 데이터는 수집 단계에서 즉시 skip
+    if (!writer || /중고장터|확인불가/.test(writer)) {
+      return; 
     }
 
     const id = `seq=${seq}`;
@@ -188,7 +197,7 @@ function parseList(html, board) {
       id,
       board: board.name,
       title,
-      writer: writer || '로그인유지', // 보정 필터 이후 남은 공백은 안전망 처리
+      writer, 
       baseMobileUrl: board.mobileUrl,
       baseDesktopUrl: board.url,
     });
@@ -210,20 +219,23 @@ function parseList(html, board) {
       const posts = parseList(html, board);
 
       for (const post of posts) {
-        if (!seen.has(post.id)) {
+        if (!newSeen.has(post.id)) {
           newPosts.push(post);
-          newSeen.add(post.id);
+          newSeen.add(post.id); 
         }
       }
     }
 
     const uniquePosts = Array.from(new Map(newPosts.map((p) => [p.id, p])).values());
+    
     if (uniquePosts.length === 0) {
       console.log('[INFO] 새 글이 없습니다.');
       return;
     }
 
-    // 1. 장터별(Board) 묶음 저장을 위한 딕셔너리 생성
+    // [중복 방지 실시간 락] 알림을 쏘기 전에 완벽하게 파일 저장부터 완료
+    saveSeenIds(newSeen);
+
     const groupedData = {};
     BOARDS.forEach(b => { groupedData[b.name] = []; });
 
@@ -238,67 +250,71 @@ function parseList(html, board) {
 
       if (!hasFilters) {
         post.matchType = 'PERIODIC';
-        post.matchReason = '🕒 정기검색 결과';
+        post.matchReason = '검색 조건 없음 (정기 스캔)';
         if (groupedData[post.board]) groupedData[post.board].push(post);
         continue;
       }
 
-      let matchedKeyword = keywords.find((kw) => titleLower.includes(kw.toLowerCase()));
       let matchedWriter = writers.find((wr) => writerLower.includes(wr.toLowerCase()));
+      let matchedKeyword = keywords.find((kw) => titleLower.includes(kw.toLowerCase()));
 
       if (matchedWriter) {
         post.matchType = 'WRITER_MATCH';
-        post.matchReason = `👤 지정게시자! (${matchedWriter})`;
+        post.matchReason = `지정게시자 필터 감지 [${matchedWriter}]`;
         if (groupedData[post.board]) groupedData[post.board].push(post);
       } else if (matchedKeyword) {
         post.matchType = 'KEYWORD_MATCH';
-        post.matchReason = `✨ 키워드! (${matchedKeyword})`;
+        post.matchReason = `키워드 필터 감지 [${matchedKeyword}]`;
         if (groupedData[post.board]) groupedData[post.board].push(post);
       }
     }
 
-    // 2. 장터별 순회하며 그룹 메시지 빌드 및 발송
+    // 🎯 [문자 생성 과정 격리 고도화] 전역 변수 오염 원천 차단 루프
     for (const boardName of Object.keys(groupedData)) {
       const postsInBoard = groupedData[boardName];
       if (postsInBoard.length === 0) continue;
 
-      // 오래된 글이 위로 오게 정렬
       const sortedPosts = postsInBoard.reverse();
-
-      // 메시지 헤더 정의
       const hasWriterMatch = sortedPosts.some(p => p.matchType === 'WRITER_MATCH');
       const mainIcon = hasWriterMatch ? '🚨🚨' : '📦';
       const globalReason = sortedPosts[0].matchType === 'PERIODIC' ? '🕒 정기검색 결과' : '✨ 필터 매칭 결과';
       
-      let messageLines = [
+      const localMessageLines = [
         `${mainIcon} <b>[${escapeHtml(boardName)}]</b> ${globalReason} (총 ${sortedPosts.length}건)`,
         `━━━━━━━━━━━━━━━━━━`
       ];
 
-      // 본문 리스트 작성
-      sortedPosts.forEach((post, index) => {
-        const safeTitle = escapeHtml(post.title);
-        const safeWriter = escapeHtml(post.writer);
-        const seqMatch = post.id.match(/seq=(\d+)/);
+      for (let i = 0; i < sortedPosts.length; i++) {
+        const currentPost = sortedPosts[i];
+        
+        // 껍데기 변수를 우회하고 내부 스코프 내 독립 상수로 직렬 바인딩해 오염 방지
+        const displayTitle = escapeHtml(currentPost.title);
+        const displayWriter = escapeHtml(currentPost.writer); 
+        const displayReason = escapeHtml(currentPost.matchReason);
+        
+        const seqMatch = currentPost.id.match(/seq=(\d+)/);
         const seq = seqMatch ? seqMatch[1] : '';
 
         let mobileUrl = 'https://bikesell.co.kr';
         let desktopUrl = 'https://bikesell.co.kr';
         if (seq) {
-          mobileUrl = post.baseMobileUrl.replace('list.asp', 'content.asp') + `&dolseq=${seq}`;
-          desktopUrl = post.baseDesktopUrl.replace('list.asp', 'content.asp') + `&dolseq=${seq}`;
+          mobileUrl = currentPost.baseMobileUrl.replace('list.asp', 'content.asp') + `&dolseq=${seq}`;
+          desktopUrl = currentPost.baseDesktopUrl.replace('list.asp', 'content.asp') + `&dolseq=${seq}`;
         }
 
-        const writerAlert = post.matchType === 'WRITER_MATCH' ? ' 🚨[특이게시자]' : '';
+        const writerAlert = currentPost.matchType === 'WRITER_MATCH' ? ' 🚨[특이게시자]' : '';
+        const simpleIdx = `${i + 1}.`; // 🎯 10번 이상 깨짐 없는 정갈한 순수 숫자 표기법
 
-        messageLines.push(
-          `${index + 1}️⃣ <b>${safeTitle}</b>${writerAlert}`,
-          `👤 <code>${safeWriter}</code> | 🔗 <a href="${mobileUrl}">[📱모바일]</a> / <a href="${desktopUrl}">[💻PC]</a>\n`
+        localMessageLines.push(
+          `<b>${simpleIdx} ${displayTitle}</b>${writerAlert}`,
+          `👤 작성자: <code>${displayWriter}</code>`,
+          `🛠️ 디버그: <i>${displayReason} (ID: ${currentPost.id})</i>`, // 🎯 항목별 개별 디버그 로그 추가
+          `🔗 링크: <a href="${mobileUrl}">[📱모바일]</a> / <a href="${desktopUrl}">[💻PC]</a>\n`
         );
-      });
+      }
 
-      messageLines.push(`━━━━━━━━━━━━━━━━━━`);
-      const finalCombinedText = messageLines.join('\n');
+      localMessageLines.push(`━━━━━━━━━━━━━━━━━━`);
+      const finalCombinedText = localMessageLines.join('\n');
 
       try {
         await sendTelegramMessage(finalCombinedText);
@@ -308,7 +324,6 @@ function parseList(html, board) {
       }
     }
 
-    saveSeenIds(newSeen);
   } catch (e) {
     console.error('[FATAL] 에러:', e);
     process.exit(1);
