@@ -19,32 +19,16 @@ if (!TOKEN || !CHAT_ID) {
   process.exit(1);
 }
 
+// 8개 통합 타겟 장터 목록
 const BOARDS = [
-  {
-    name: '산악완성차 중고장터',
-    url: 'https://bikesell.co.kr/site/board/list.asp?doltop=MARKET&dolsection=MARKET1',
-    mobileUrl: 'https://bikesell.co.kr/site/m/list.asp?doltop=MARKET&dolsection=MARKET1',
-  },
-  {
-    name: '산악프레임 중고장터',
-    url: 'https://bikesell.co.kr/site/board/list.asp?doltop=MARKET&dolsection=MARKET2',
-    mobileUrl: 'https://bikesell.co.kr/site/m/list.asp?doltop=MARKET&dolsection=MARKET2',
-  },
-  {
-    name: '산악 샥포크 중고장터',
-    url: 'https://bikesell.co.kr/site/board/list.asp?doltop=MARKET&dolsection=MARKET3',
-    mobileUrl: 'https://bikesell.co.kr/site/m/list.asp?doltop=MARKET&dolsection=MARKET3',
-  },
-  {
-    name: '산악부속 중고장터',
-    url: 'https://bikesell.co.kr/site/board/list.asp?doltop=MARKET&dolsection=MARKET4',
-    mobileUrl: 'https://bikesell.co.kr/site/m/list.asp?doltop=MARKET&dolsection=MARKET4',
-  },
-  {
-    name: '전기자전거 부품장터',
-    url: 'https://bikesell.co.kr/site/board/list.asp?doltop=MARKET&dolsection=MARKET24',
-    mobileUrl: 'https://bikesell.co.kr/site/m/list.asp?doltop=MARKET&dolsection=MARKET24',
-  },
+  { name: '산악완성차 중고장터', url: 'https://bikesell.co.kr/site/board/list.asp?doltop=MARKET&dolsection=MARKET1', mobileUrl: 'https://bikesell.co.kr/site/m/list.asp?doltop=MARKET&dolsection=MARKET1' },
+  { name: '산악프레임 중고장터', url: 'https://bikesell.co.kr/site/board/list.asp?doltop=MARKET&dolsection=MARKET2', mobileUrl: 'https://bikesell.co.kr/site/m/list.asp?doltop=MARKET&dolsection=MARKET2' },
+  { name: '산악 샥포크 중고장터', url: 'https://bikesell.co.kr/site/board/list.asp?doltop=MARKET&dolsection=MARKET3', mobileUrl: 'https://bikesell.co.kr/site/m/list.asp?doltop=MARKET&dolsection=MARKET3' },
+  { name: '산악부속 중고장터', url: 'https://bikesell.co.kr/site/board/list.asp?doltop=MARKET&dolsection=MARKET4', mobileUrl: 'https://bikesell.co.kr/site/m/list.asp?doltop=MARKET&dolsection=MARKET4' },
+  { name: '전기자전거 부품장터', url: 'https://bikesell.co.kr/site/board/list.asp?doltop=MARKET&dolsection=MARKET24', mobileUrl: 'https://bikesell.co.kr/site/m/list.asp?doltop=MARKET&dolsection=MARKET24' },
+  { name: '전기자전거 완성차장터', url: 'https://bikesell.co.kr/site/board/list.asp?doltop=MARKET&dolsection=MARKET21', mobileUrl: 'https://bikesell.co.kr/site/m/list.asp?doltop=MARKET&dolsection=MARKET21' },
+  { name: '미니벨로 완성차장터', url: 'https://bikesell.co.kr/site/board/list.asp?doltop=MARKET&dolsection=MARKET31', mobileUrl: 'https://bikesell.co.kr/site/m/list.asp?doltop=MARKET&dolsection=MARKET31' },
+  { name: '미니벨로 부품장터', url: 'https://bikesell.co.kr/site/board/list.asp?doltop=MARKET&dolsection=MARKET34', mobileUrl: 'https://bikesell.co.kr/site/m/list.asp?doltop=MARKET&dolsection=MARKET34' }
 ];
 
 const SEEN_FILE = path.join(__dirname, '..', 'seen_posts.json');
@@ -62,9 +46,18 @@ function loadSeenIds() {
   }
 }
 
+// 🎯 [수정] 파일 저장 시 200개 검증 및 오래된 100개 압축 로직 추가
 function saveSeenIds(set) {
   try {
-    fs.writeFileSync(SEEN_FILE, JSON.stringify(Array.from(set), null, 2), 'utf8');
+    let arr = Array.from(set);
+    
+    if (arr.length >= 200) {
+      console.log(`[CACHE_DIET] 캐시가 ${arr.length}개에 도달했습니다. 오래된 데이터 100개를 정리합니다.`);
+      // 배열 뒷부분이 최신 수집본이므로, 앞쪽(과거)을 잘라내고 최신 100개만 남김
+      arr = arr.slice(-100);
+    }
+
+    fs.writeFileSync(SEEN_FILE, JSON.stringify(arr, null, 2), 'utf8');
   } catch (e) {
     console.error('[ERROR] seen_posts.json 저장 오류:', e);
   }
@@ -133,7 +126,7 @@ function parseList(html, board) {
   const results = [];
   
   const $trs = $('tr');
-  console.log(`   └ [파싱] ${board.name} -> 총 ${$trs.length}개의 행 분석 중...`);
+  console.log(`    └ [파싱] ${board.name} -> 총 ${$trs.length}개의 행 분석 중...`);
 
   $trs.each((_, tr) => {
     const $tr = $(tr);
@@ -156,14 +149,13 @@ function parseList(html, board) {
 
     const href = $titleLink.attr('href') || '';
     
-    // 🎯 [핵심 패치 1] 모든 종류의 고유 번호 파라미터(seq, no, dolseq)를 완벽 대응하도록 변경
     const seqMatch = href.match(/(?:seq|no|dolseq)=(\d+)/i);
     if (!seqMatch) return;
     const seq = seqMatch[1]; 
-    const id = `${board.name}_${seq}`; // 게시판별 넘버링 충돌 방지를 위해 접두사 추가
+    const id = `${board.name}_${seq}`;
 
     let title = $titleLink.text().replace(/\s+/g, ' ').trim();
-    title = title.replace(/\[\s*\d+\s*\]$/, '').trim(); // 댓글수 제거
+    title = title.replace(/\[\s*\d+\s*\]$/, '').trim();
     if (!title) return;
 
     let fullRowText = $tr.text().replace(/로그인유지/g, '').replace(/\s+/g, ' ').trim();
@@ -174,7 +166,6 @@ function parseList(html, board) {
     if (dateMatch && dateMatch[1]) {
       let rawWriter = dateMatch[1].trim();
       
-      // 조회수 숫자 정제 예외처리 제거 (순수 텍스트 추출 보정)
       if (/^\d+[a-zA-Z가-힣]/.test(rawWriter)) {
         rawWriter = rawWriter.replace(/^\d+/, ''); 
       }
@@ -202,7 +193,7 @@ function parseList(html, board) {
 
 (async () => {
   console.log('====================================================');
-  console.log('[START] 바이크셀 ID 정밀 패치 버전 구동');
+  console.log('[START] 바이크셀 8개 통합 장터 구동 엔진 (자동 캐시 슬라이싱)');
   console.log('====================================================');
 
   const seen = loadSeenIds();
@@ -237,7 +228,6 @@ function parseList(html, board) {
       return;
     }
 
-    // 파일 저장
     saveSeenIds(newSeen);
 
     const groupedData = {};
@@ -296,7 +286,6 @@ function parseList(html, board) {
         const displayWriter = escapeHtml(currentPost.writer); 
         const displayReason = escapeHtml(currentPost.matchReason);
         
-        // 🎯 [핵심 패치 2] 추출된 안전한 고유 seq 기반으로 링크 생성
         const seq = currentPost.seq;
         let mobileUrl = 'https://bikesell.co.kr';
         let desktopUrl = 'https://bikesell.co.kr';
