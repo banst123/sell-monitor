@@ -19,7 +19,6 @@ if (!TOKEN || !CHAT_ID) {
   process.exit(1);
 }
 
-// 8개 통합 타겟 장터 목록
 const BOARDS = [
   { name: '산악완성차 중고장터', url: 'https://bikesell.co.kr/site/board/list.asp?doltop=MARKET&dolsection=MARKET1', mobileUrl: 'https://bikesell.co.kr/site/m/list.asp?doltop=MARKET&dolsection=MARKET1' },
   { name: '산악프레임 중고장터', url: 'https://bikesell.co.kr/site/board/list.asp?doltop=MARKET&dolsection=MARKET2', mobileUrl: 'https://bikesell.co.kr/site/m/list.asp?doltop=MARKET&dolsection=MARKET2' },
@@ -50,7 +49,6 @@ function saveSeenIds(set) {
   try {
     let arr = Array.from(set);
     if (arr.length >= 200) {
-      console.log(`[CACHE_DIET] 캐시가 ${arr.length}개에 도달했습니다. 오래된 데이터 100개를 정리합니다.`);
       arr = arr.slice(-100);
     }
     fs.writeFileSync(SEEN_FILE, JSON.stringify(arr, null, 2), 'utf8');
@@ -117,12 +115,12 @@ function escapeHtml(text) {
   return (text || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
-// 🎯 [완전 복구] 화면 복사본 기반 라인 스캔 파서
+// 🎯 [로그 추적 패치] 매칭 프로세스 시각화 시스템
 function parseList(html, board) {
   const $ = cheerio.load(html);
   const results = [];
 
-  // 1단계: 글 고유 seq 번호를 미리 다 뽑아서 맵에 보관 (오동작 방지)
+  // 1. 링크 맵 구성
   const seqMap = new Map();
   $('a[href*="content.asp"]').each((_, el) => {
     const href = $(el).attr('href') || '';
@@ -136,23 +134,29 @@ function parseList(html, board) {
     }
   });
 
-  // 2단계: 전체 텍스트 덤프 후 줄바꿈 단위 전처리
+  // 2. 전체 텍스트 라인 변환
   const pageText = $('body').text();
   const lines = pageText.split('\n').map(l => l.trim()).filter(l => l.length > 0);
 
-  // 3단계: 패턴 추적 루프
+  // 🔍 [디버그 로그] 수집된 데이터의 첫 15줄 샘플 강제 출력
+  console.log(`    ⚠️ [-- 텍스트 스트림 상위 샘플 스냅샷 --]`);
+  lines.slice(0, 15).forEach((line, idx) => {
+    console.log(`        [Line ${idx}] ${line}`);
+  });
+  console.log(`    -----------------------------------------`);
+
+  // 3. 루프 분석 시작
   for (let i = 0; i < lines.length - 1; i++) {
     const currentLine = lines[i];
     const nextLine = lines[i + 1];
 
-    // 날짜/시간 포맷 매칭 조건 (오늘 시간 및 일자 전체 대응)
     const dateRegex = /(\d{4}-\d{2}-\d{2})|((오전|오후)\s*\d+:\d+)|(^\d{2}:\d{2}$)/;
 
-    // 만약 다음 줄(i+1)이 날짜 데이터라면, 현재 줄(i)에 [제목]과 [조회수+닉네임]이 뭉쳐서 들어있음
     if (dateRegex.test(nextLine)) {
-      
-      // 복사본 패턴 검정 정규식: 제목 끝부분 -> 조회수(숫자) + 닉네임(문자)
-      // 예시: 첼로 xc80 17인치[ 0 ] 224tearu  또는  에스웍 프레임[ 2 ] 291syccowboy
+      // 🔍 [디버그 로그] 다음 줄이 날짜 패턴일 때 매칭 조건 진입 상황 기록
+      console.log(`    [탐색타겟팅] Line ${i} -> 다음 줄이 날짜 포맷임 확인: "${nextLine}"`);
+      console.log(`               현재 분석중인 줄: "${currentLine}"`);
+
       const match = currentLine.match(/(.*?)(?:\[\s*\d+\s*\])?\s+(\d+)([a-zA-Z가-힣0-9_]+)$/);
 
       if (match) {
@@ -160,18 +164,19 @@ function parseList(html, board) {
         const hitCount = match[2];
         let writer = match[3].trim();
 
-        // 상단 공지사항, 불필요 영역 스킵
+        console.log(`      └ ❗ [정규식 성공] 추출값 -> 제목: "${title}" | 조회수: ${hitCount} | 작성자: "${writer}"`);
+
         if (/중고|장터|산악|완성차|부속|부품|댓글|공지|조회|추천|현재위치|로그인/i.test(writer) || writer.length > 16) {
+          console.log(`        └ ❌ [스킵] 작성자 이름이 예약어 규칙에 걸림.`);
           continue;
         }
         if (title.length < 2 || /현재위치/i.test(title)) {
+          console.log(`        └ ❌ [스킵] 제목이 너무 짧거나 필터 조건에 걸림.`);
           continue;
         }
 
-        // seq 매핑
         let seq = seqMap.get(title);
         if (!seq) {
-          // 공백 등 미세 차이가 있을 경우 유사 검색
           for (let [tKey, sVal] of seqMap.entries()) {
             if (tKey.includes(title) || title.includes(tKey)) {
               seq = sVal;
@@ -180,7 +185,10 @@ function parseList(html, board) {
           }
         }
 
-        if (!seq) continue;
+        if (!seq) {
+          console.log(`        └ ❌ [링크 유실] 제목과 맵핑되는 content.asp 일치 seq 번호를 찾지 못함.`);
+          continue;
+        }
 
         const id = `${board.name}_${seq}`;
         if (results.some(p => p.id === id)) continue;
@@ -194,17 +202,20 @@ function parseList(html, board) {
           baseMobileUrl: board.mobileUrl,
           baseDesktopUrl: board.url,
         });
+      } else {
+        // 🔍 [디버그 로그] 정규식 슬라이싱 자체를 실패한 케이스 추적
+        console.log(`      └ ❌ [정규식 실패] "제목 + 조회수 + 닉네임" 구조가 양식에 맞지 않음.`);
       }
     }
   }
 
-  console.log(`    └ [파싱 완료] ${board.name} -> 총 ${results.length}개 유효 매물 정제됨`);
+  console.log(`    └ [결과 보고] ${board.name} -> 최종 ${results.length}개 정제`);
   return results;
 }
 
 (async () => {
   console.log('====================================================');
-  console.log('[START] 바이크셀 8개 통합 장터 구동 엔진 (완전 복구 라인 스캔 방식)');
+  console.log('[START] 바이크셀 통합 장터 분석 엔진 (디버그 로그 추적 모드)');
   console.log('====================================================');
 
   const seen = loadSeenIds();
@@ -214,12 +225,12 @@ function parseList(html, board) {
 
   try {
     for (const board of BOARDS) {
-      console.log(`[진입] ${board.name} 데이터 수집 중...`);
+      console.log(`\n[진입] ${board.name} 스캔 실행`);
       let html;
       try { 
         html = await httpGet(board.url); 
       } catch (e) { 
-        console.error(`   └ [실패] 연결 오류: ${e.message}`);
+        console.error(`   └ [HTTP 에러]: ${e.message}`);
         continue; 
       }
 
@@ -276,7 +287,7 @@ function parseList(html, board) {
       }
     }
 
-    console.log('\n[알림단계] 텔레그램 메시지 정방향 순서 발송 개시...');
+    console.log('\n[알림단계] 텔레그램 발송 중...');
     for (const boardName of Object.keys(groupedData)) {
       const postsInBoard = groupedData[boardName];
       if (postsInBoard.length === 0) continue;
@@ -292,7 +303,6 @@ function parseList(html, board) {
 
       for (let i = 0; i < postsInBoard.length; i++) {
         const currentPost = postsInBoard[i];
-        
         const displayTitle = escapeHtml(currentPost.title);
         const displayWriter = escapeHtml(currentPost.writer); 
         const displayReason = escapeHtml(currentPost.matchReason);
@@ -327,7 +337,7 @@ function parseList(html, board) {
         console.error(`   [ERROR] 발송 실패:`, e.message);
       }
     }
-    console.log('\n[FINISH] 모니터링 주기가 안정적으로 종료되었습니다.');
+    console.log('\n[FINISH] 안정적으로 종료되었습니다.');
 
   } catch (e) {
     console.error('[FATAL] 에러 발생:', e);
