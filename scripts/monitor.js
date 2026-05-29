@@ -117,85 +117,81 @@ function escapeHtml(text) {
   return (text || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
+// 🎯 [완전 개편] 이전 대화 방식의 텍스트 기반 전체 스캔 파서
 function parseList(html, board) {
   const $ = cheerio.load(html);
   const results = [];
+
+  // HTML 태그와 상관없이 본문 텍스트 전체를 하나로 병합
+  const pageText = $('body').text();
   
-  const $trs = $('tr');
-  console.log(`    └ [파싱] ${board.name} -> 총 ${$trs.length}개의 행 분석 중...`);
-
-  $trs.each((_, tr) => {
-    const $tr = $(tr);
-    
-    const $links = $tr.find('a[href*="content.asp"]');
-    if ($links.length === 0) return;
-
-    let $titleLink = null;
-    $links.each((_, a) => {
-      const $a = $(a);
-      const href = $a.attr('href') || '';
-      const text = $a.text().trim();
-      if (!href.includes('WatchList.asp') && text.length > 1) {
-        $titleLink = $a;
-        return false;
-      }
-    });
-
-    if (!$titleLink) return;
-
-    const href = $titleLink.attr('href') || '';
-    
+  // 개별 게시글의 seq 번호 매칭을 위한 링크 맵 미리 생성
+  const seqMap = new Map();
+  $('a[href*="content.asp"]').each((_, el) => {
+    const href = $(el).attr('href') || '';
     const seqMatch = href.match(/(?:seq|no|dolseq)=(\d+)/i);
-    if (!seqMatch) return;
-    const seq = seqMatch[1]; 
-    const id = `${board.name}_${seq}`;
-
-    let title = $titleLink.text().replace(/\s+/g, ' ').trim();
-    title = title.replace(/\[\s*\d+\s*\]$/, '').trim();
-    if (!title) return;
-
-    // 🎯 [작성자 추출 버그 패치 영역]
-    // 1단계: '로그인유지' 같은 부가 요소를 날리고 공백을 단일화하여 텍스트 유실을 막음
-    let fullRowText = $tr.text().replace(/로그인유지/g, '').replace(/\s+/g, ' ').trim();
-
-    let writer = '일반판매자';
-    
-    // 2단계: 날짜(YYYY-MM-DD) 정보 직전의 단어를 작성자로 임시 파싱
-    const dateMatch = fullRowText.match(/([^\s]+)\s+\d{4}-\d{2}-\d{2}/);
-    
-    if (dateMatch && dateMatch[1]) {
-      let rawWriter = dateMatch[1].trim();
-      
-      // 3단계: 조회수가 닉네임 앞에 붙어 나오는 경우(예: 147홍길동) 숫자 영역을 완전 격리
-      if (/^\d+[a-zA-Z가-힣]/.test(rawWriter)) {
-        rawWriter = rawWriter.replace(/^\d+/, ''); 
-      }
-
-      // 4단계: 장터 컴포넌트 텍스트나 시스템 예약어가 이름으로 오인되는 것을 방지하는 정밀 필터링
-      if (!/중고|장터|산악|완성차|부속|부품|댓글|공지|조회|추천|id|pass/i.test(rawWriter) && rawWriter.length <= 16) {
-        writer = rawWriter;
+    if (seqMatch) {
+      const titleText = $(el).text().replace(/\s+/g, ' ').trim();
+      if (titleText.length > 1 && !href.includes('WatchList.asp')) {
+        seqMap.set(titleText, seqMatch[1]);
       }
     }
+  });
 
-    if (results.some(p => p.id === id)) return;
+  // 🎯 바이크셀 고유의 텍스트 덤프 흐름 추적 정규식
+  // [제목] -> [댓글수 옵션] -> [조회수(숫자)] -> [작성자(텍스트)] -> [날짜(YYYY-MM-DD 또는 시간)]
+  const postRegex = /([^\n▒]+)(?:\[\s*\d+\s*\])?\s*(\d+)([a-zA-Z가-힣0-9_]+)\s*(\d{4}-\d{2}-\d{2}|(?:오전|오후)\s*\d+:\d+|\d{2}:\d{2})/g;
+
+  let match;
+  while ((match = postRegex.exec(pageText)) !== null) {
+    let title = match[1].replace(/\s+/g, ' ').trim();
+    const hitCount = match[2]; // 조회수 분리용
+    let writer = match[3].trim();
+    const dateStr = match[4];
+
+    // 시스템 예약어 걸러내기
+    if (/중고|장터|산악|완성차|부속|부품|댓글|공지|조회|추천|로그인/i.test(writer) || writer.length > 16) {
+      continue;
+    }
+    if (title.length < 2 || /현재위치/i.test(title)) {
+      continue;
+    }
+
+    // 미리 확보한 제목 맵에서 seq 추출, 실패시 제목 문자열 자체에서 유사 매칭 시도
+    let seq = seqMap.get(title);
+    if (!seq) {
+      for (let [tKey, sVal] of seqMap.entries()) {
+        if (tKey.includes(title) || title.includes(tKey)) {
+          seq = sVal;
+          break;
+        }
+      }
+    }
+    
+    if (!seq) continue; // 링크 주소를 맵핑할 수 없는 글은 제외
+
+    const id = `${board.name}_${seq}`;
+
+    if (results.some(p => p.id === id)) continue;
 
     results.push({
       id,
       seq,
       board: board.name,
       title,
-      writer, 
+      writer,
       baseMobileUrl: board.mobileUrl,
       baseDesktopUrl: board.url,
     });
-  });
+  }
 
+  console.log(`    └ [파싱 완료] ${board.name} -> 총 ${results.length}개 유효 매물 정제됨`);
   return results;
 }
 
 (async () => {
   console.log('====================================================');
-  console.log('[START] 바이크셀 8개 통합 장터 구동 엔진 (작성자 버그 완치)');
+  console.log('[START] 바이크셀 8개 통합 장터 구동 엔진 (텍스트 덤프 서치 방식)');
   console.log('====================================================');
 
   const seen = loadSeenIds();
