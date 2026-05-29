@@ -115,12 +115,12 @@ function escapeHtml(text) {
   return (text || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
-// 🎯 [로그 추적 패치] 매칭 프로세스 시각화 시스템
+// 🎯 [정밀 튜닝] 서버 텍스트 스트림 맞춤형 라인 스캔 파서
 function parseList(html, board) {
   const $ = cheerio.load(html);
   const results = [];
 
-  // 1. 링크 맵 구성
+  // 1단계: 링크 일치시킬 고유 seq Map 빌드
   const seqMap = new Map();
   $('a[href*="content.asp"]').each((_, el) => {
     const href = $(el).attr('href') || '';
@@ -134,62 +134,57 @@ function parseList(html, board) {
     }
   });
 
-  // 2. 전체 텍스트 라인 변환
+  // 2단계: 텍스트 줄바꿈 슬라이싱
   const pageText = $('body').text();
   const lines = pageText.split('\n').map(l => l.trim()).filter(l => l.length > 0);
 
-  // 🔍 [디버그 로그] 수집된 데이터의 첫 15줄 샘플 강제 출력
-  console.log(`    ⚠️ [-- 텍스트 스트림 상위 샘플 스냅샷 --]`);
-  lines.slice(0, 15).forEach((line, idx) => {
-    console.log(`        [Line ${idx}] ${line}`);
-  });
-  console.log(`    -----------------------------------------`);
+  // 3단계: 날짜를 기준으로 위쪽 라인 역추적 매칭
+  const dateRegex = /(\d{4}-\d{2}-\d{2})|((오전|오후)\s*\d+:\d+)|(^\d{2}:\d{2}$)/;
 
-  // 3. 루프 분석 시작
-  for (let i = 0; i < lines.length - 1; i++) {
-    const currentLine = lines[i];
-    const nextLine = lines[i + 1];
+  for (let i = 2; i < lines.length; i++) {
+    const currentDateLine = lines[i];
 
-    const dateRegex = /(\d{4}-\d{2}-\d{2})|((오전|오후)\s*\d+:\d+)|(^\d{2}:\d{2}$)/;
+    if (dateRegex.test(currentDateLine)) {
+      // 날짜 한 줄 위(i-1)가 무조건 순수 작성자(닉네임)
+      let writer = lines[i - 1];
 
-    if (dateRegex.test(nextLine)) {
-      // 🔍 [디버그 로그] 다음 줄이 날짜 패턴일 때 매칭 조건 진입 상황 기록
-      console.log(`    [탐색타겟팅] Line ${i} -> 다음 줄이 날짜 포맷임 확인: "${nextLine}"`);
-      console.log(`               현재 분석중인 줄: "${currentLine}"`);
+      // 시스템 필터링 및 예외처리
+      if (/중고|장터|산악|완성차|부속|부품|댓글|공지|조회|추천|현재위치|로그인/i.test(writer) || writer.length > 16) {
+        continue;
+      }
 
-      const match = currentLine.match(/(.*?)(?:\[\s*\d+\s*\])?\s+(\d+)([a-zA-Z가-힣0-9_]+)$/);
+      let title = '';
+      let seq = '';
 
-      if (match) {
-        let title = match[1].replace(/\s+/g, ' ').trim();
-        const hitCount = match[2];
-        let writer = match[3].trim();
+      // 작성자 위쪽으로 탐색하면서 seqMap에 등록된 제목이 존재하는지 역추적 (보통 i-2 또는 i-3에 위치)
+      for (let j = 1; j <= 4; j++) {
+        if (i - j < 0) break;
+        const potentialTitle = lines[i - j - 1];
+        if (!potentialTitle) continue;
 
-        console.log(`      └ ❗ [정규식 성공] 추출값 -> 제목: "${title}" | 조회수: ${hitCount} | 작성자: "${writer}"`);
-
-        if (/중고|장터|산악|완성차|부속|부품|댓글|공지|조회|추천|현재위치|로그인/i.test(writer) || writer.length > 16) {
-          console.log(`        └ ❌ [스킵] 작성자 이름이 예약어 규칙에 걸림.`);
-          continue;
-        }
-        if (title.length < 2 || /현재위치/i.test(title)) {
-          console.log(`        └ ❌ [스킵] 제목이 너무 짧거나 필터 조건에 걸림.`);
-          continue;
-        }
-
-        let seq = seqMap.get(title);
-        if (!seq) {
+        // 링크 맵에서 매칭 시도
+        let foundSeq = seqMap.get(potentialTitle);
+        if (!foundSeq) {
+          // 공백 등 미세 오차가 있을 때 부분 매칭 검증
           for (let [tKey, sVal] of seqMap.entries()) {
-            if (tKey.includes(title) || title.includes(tKey)) {
-              seq = sVal;
-              break;
+            if (tKey.includes(potentialTitle) || potentialTitle.includes(tKey)) {
+              if (potentialTitle.length > 3) {
+                foundSeq = sVal;
+                break;
+              }
             }
           }
         }
 
-        if (!seq) {
-          console.log(`        └ ❌ [링크 유실] 제목과 맵핑되는 content.asp 일치 seq 번호를 찾지 못함.`);
-          continue;
+        if (foundSeq && !/중고|장터|산악|완성차|부속|부품|댓글|공지|조회|추천|현재위치|로그인/i.test(potentialTitle)) {
+          title = potentialTitle;
+          seq = foundSeq;
+          break;
         }
+      }
 
+      // 제목과 고유 주소를 모두 찾았을 때만 최종 매물로 확보
+      if (title && seq) {
         const id = `${board.name}_${seq}`;
         if (results.some(p => p.id === id)) continue;
 
@@ -202,20 +197,17 @@ function parseList(html, board) {
           baseMobileUrl: board.mobileUrl,
           baseDesktopUrl: board.url,
         });
-      } else {
-        // 🔍 [디버그 로그] 정규식 슬라이싱 자체를 실패한 케이스 추적
-        console.log(`      └ ❌ [정규식 실패] "제목 + 조회수 + 닉네임" 구조가 양식에 맞지 않음.`);
       }
     }
   }
 
-  console.log(`    └ [결과 보고] ${board.name} -> 최종 ${results.length}개 정제`);
+  console.log(`    └ [파싱 완료] ${board.name} -> 총 ${results.length}개 매물 정제 완료`);
   return results;
 }
 
 (async () => {
   console.log('====================================================');
-  console.log('[START] 바이크셀 통합 장터 분석 엔진 (디버그 로그 추적 모드)');
+  console.log('[START] 바이크셀 8개 통합 장터 구동 엔진 (서버 스트림 최적화본)');
   console.log('====================================================');
 
   const seen = loadSeenIds();
@@ -225,12 +217,12 @@ function parseList(html, board) {
 
   try {
     for (const board of BOARDS) {
-      console.log(`\n[진입] ${board.name} 스캔 실행`);
+      console.log(`[진입] ${board.name} 데이터 수집 중...`);
       let html;
       try { 
         html = await httpGet(board.url); 
       } catch (e) { 
-        console.error(`   └ [HTTP 에러]: ${e.message}`);
+        console.error(`   └ [실패] 연결 오류: ${e.message}`);
         continue; 
       }
 
@@ -287,7 +279,7 @@ function parseList(html, board) {
       }
     }
 
-    console.log('\n[알림단계] 텔레그램 발송 중...');
+    console.log('\n[알림단계] 텔레그램 메시지 발송 개시...');
     for (const boardName of Object.keys(groupedData)) {
       const postsInBoard = groupedData[boardName];
       if (postsInBoard.length === 0) continue;
@@ -303,6 +295,7 @@ function parseList(html, board) {
 
       for (let i = 0; i < postsInBoard.length; i++) {
         const currentPost = postsInBoard[i];
+        
         const displayTitle = escapeHtml(currentPost.title);
         const displayWriter = escapeHtml(currentPost.writer); 
         const displayReason = escapeHtml(currentPost.matchReason);
@@ -337,7 +330,7 @@ function parseList(html, board) {
         console.error(`   [ERROR] 발송 실패:`, e.message);
       }
     }
-    console.log('\n[FINISH] 안정적으로 종료되었습니다.');
+    console.log('\n[FINISH] 모니터링 주기가 안정적으로 종료되었습니다.');
 
   } catch (e) {
     console.error('[FATAL] 에러 발생:', e);
