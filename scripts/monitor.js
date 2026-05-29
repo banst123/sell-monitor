@@ -46,17 +46,13 @@ function loadSeenIds() {
   }
 }
 
-// 🎯 [수정] 파일 저장 시 200개 검증 및 오래된 100개 압축 로직 추가
 function saveSeenIds(set) {
   try {
     let arr = Array.from(set);
-    
     if (arr.length >= 200) {
       console.log(`[CACHE_DIET] 캐시가 ${arr.length}개에 도달했습니다. 오래된 데이터 100개를 정리합니다.`);
-      // 배열 뒷부분이 최신 수집본이므로, 앞쪽(과거)을 잘라내고 최신 100개만 남김
       arr = arr.slice(-100);
     }
-
     fs.writeFileSync(SEEN_FILE, JSON.stringify(arr, null, 2), 'utf8');
   } catch (e) {
     console.error('[ERROR] seen_posts.json 저장 오류:', e);
@@ -158,18 +154,24 @@ function parseList(html, board) {
     title = title.replace(/\[\s*\d+\s*\]$/, '').trim();
     if (!title) return;
 
+    // 🎯 [작성자 추출 버그 패치 영역]
+    // 1단계: '로그인유지' 같은 부가 요소를 날리고 공백을 단일화하여 텍스트 유실을 막음
     let fullRowText = $tr.text().replace(/로그인유지/g, '').replace(/\s+/g, ' ').trim();
 
     let writer = '일반판매자';
+    
+    // 2단계: 날짜(YYYY-MM-DD) 정보 직전의 단어를 작성자로 임시 파싱
     const dateMatch = fullRowText.match(/([^\s]+)\s+\d{4}-\d{2}-\d{2}/);
     
     if (dateMatch && dateMatch[1]) {
       let rawWriter = dateMatch[1].trim();
       
+      // 3단계: 조회수가 닉네임 앞에 붙어 나오는 경우(예: 147홍길동) 숫자 영역을 완전 격리
       if (/^\d+[a-zA-Z가-힣]/.test(rawWriter)) {
         rawWriter = rawWriter.replace(/^\d+/, ''); 
       }
 
+      // 4단계: 장터 컴포넌트 텍스트나 시스템 예약어가 이름으로 오인되는 것을 방지하는 정밀 필터링
       if (!/중고|장터|산악|완성차|부속|부품|댓글|공지|조회|추천|id|pass/i.test(rawWriter) && rawWriter.length <= 16) {
         writer = rawWriter;
       }
@@ -193,7 +195,7 @@ function parseList(html, board) {
 
 (async () => {
   console.log('====================================================');
-  console.log('[START] 바이크셀 8개 통합 장터 구동 엔진 (자동 캐시 슬라이싱)');
+  console.log('[START] 바이크셀 8개 통합 장터 구동 엔진 (작성자 버그 완치)');
   console.log('====================================================');
 
   const seen = loadSeenIds();
@@ -216,7 +218,7 @@ function parseList(html, board) {
 
       for (const post of posts) {
         if (!newSeen.has(post.id)) {
-          console.log(`      [★신규발견] ID: ${post.id} | 제목: ${post.title}`);
+          console.log(`      [★신규발견] ID: ${post.id} | 제목: ${post.title} | 작성자: ${post.writer}`);
           newPosts.push(post);
           newSeen.add(post.id); 
         }
