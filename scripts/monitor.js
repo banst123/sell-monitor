@@ -117,86 +117,86 @@ function escapeHtml(text) {
   return (text || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
-// 🎯 [핵심] 행 단위의 순수 텍스트 배열 매칭 알고리즘
+// 🎯 [완전 복구] 화면 복사본 기반 라인 스캔 파서
 function parseList(html, board) {
   const $ = cheerio.load(html);
   const results = [];
 
-  $('tr').each((_, tr) => {
-    const $tr = $(tr);
-    
-    // 1단계: 게시글 본문 링크가 존재하는 행인지 먼저 검증
-    const $links = $tr.find('a[href*="content.asp"]');
-    if ($links.length === 0) return;
-
-    let $titleLink = null;
-    let seq = null;
-
-    $links.each((_, a) => {
-      const $a = $(a);
-      const href = $a.attr('href') || '';
-      if (!href.includes('WatchList.asp')) {
-        const seqMatch = href.match(/(?:seq|no|dolseq)=(\d+)/i);
-        if (seqMatch) {
-          seq = seqMatch[1];
-          $titleLink = $a;
-          return false;
-        }
-      }
-    });
-
-    if (!seq || !$titleLink) return;
-
-    // 2단계: 행 내부의 모든 텍스트 요소를 배열로 쪼개기
-    // 공백을 다듬고 빈 아이템을 제거하여 깨끗한 텍스트 뭉치 배열 확보
-    const cellTexts = $tr.find('td').map((_, td) => {
-      return $(td).text().replace(/\s+/g, ' ').trim();
-    }).get().filter(t => t.length > 0);
-
-    if (cellTexts.length < 3) return;
-
-    // 3단계: 제목 정제 (댓글수 제거)
-    let title = $titleLink.text().replace(/\s+/g, ' ').trim();
-    title = title.replace(/\[\s*\d+\s*\]$/, '').trim();
-    if (!title || title.length < 2 || /현재위치/i.test(title)) return;
-
-    // 4단계: 날짜/시간 포맷이 들어있는 칸을 기준으로 작성자 역추적
-    const dateRegex = /(\d{4}-\d{2}-\d{2})|((오전|오후)\s*\d+:\d+)|(^\d{2}:\d{2}$)/;
-    let writer = '일반판매자';
-
-    for (let i = 0; i < cellTexts.length; i++) {
-      if (dateRegex.test(cellTexts[i])) {
-        // 보통 날짜 칸 바로 앞(i-1)이 작성자(닉네임) 칸입니다.
-        if (i > 0) {
-          let rawWriter = cellTexts[i - 1];
-          
-          // '로그인유지' 지우기 및 조회수가 이름 앞에 들러붙은 현상 분리
-          rawWriter = rawWriter.replace(/로그인유지/g, '').trim();
-          if (/^\d+[a-zA-Z가-힣]/.test(rawWriter)) {
-            rawWriter = rawWriter.replace(/^\d+/, ''); // 앞쪽 조회수 숫자 완벽 커트
-          }
-
-          if (rawWriter && !/중고|장터|산악|완성차|부속|부품|댓글|공지|조회|추천/i.test(rawWriter) && rawWriter.length <= 16) {
-            writer = rawWriter;
-            break;
-          }
-        }
+  // 1단계: 글 고유 seq 번호를 미리 다 뽑아서 맵에 보관 (오동작 방지)
+  const seqMap = new Map();
+  $('a[href*="content.asp"]').each((_, el) => {
+    const href = $(el).attr('href') || '';
+    if (href.includes('WatchList.asp')) return;
+    const seqMatch = href.match(/(?:seq|no|dolseq)=(\d+)/i);
+    if (seqMatch) {
+      const cleanText = $(el).text().replace(/\s+/g, ' ').trim();
+      if (cleanText.length > 1) {
+        seqMap.set(cleanText, seqMatch[1]);
       }
     }
-
-    const id = `${board.name}_${seq}`;
-    if (results.some(p => p.id === id)) return;
-
-    results.push({
-      id,
-      seq,
-      board: board.name,
-      title,
-      writer,
-      baseMobileUrl: board.mobileUrl,
-      baseDesktopUrl: board.url,
-    });
   });
+
+  // 2단계: 전체 텍스트 덤프 후 줄바꿈 단위 전처리
+  const pageText = $('body').text();
+  const lines = pageText.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+
+  // 3단계: 패턴 추적 루프
+  for (let i = 0; i < lines.length - 1; i++) {
+    const currentLine = lines[i];
+    const nextLine = lines[i + 1];
+
+    // 날짜/시간 포맷 매칭 조건 (오늘 시간 및 일자 전체 대응)
+    const dateRegex = /(\d{4}-\d{2}-\d{2})|((오전|오후)\s*\d+:\d+)|(^\d{2}:\d{2}$)/;
+
+    // 만약 다음 줄(i+1)이 날짜 데이터라면, 현재 줄(i)에 [제목]과 [조회수+닉네임]이 뭉쳐서 들어있음
+    if (dateRegex.test(nextLine)) {
+      
+      // 복사본 패턴 검정 정규식: 제목 끝부분 -> 조회수(숫자) + 닉네임(문자)
+      // 예시: 첼로 xc80 17인치[ 0 ] 224tearu  또는  에스웍 프레임[ 2 ] 291syccowboy
+      const match = currentLine.match(/(.*?)(?:\[\s*\d+\s*\])?\s+(\d+)([a-zA-Z가-힣0-9_]+)$/);
+
+      if (match) {
+        let title = match[1].replace(/\s+/g, ' ').trim();
+        const hitCount = match[2];
+        let writer = match[3].trim();
+
+        // 상단 공지사항, 불필요 영역 스킵
+        if (/중고|장터|산악|완성차|부속|부품|댓글|공지|조회|추천|현재위치|로그인/i.test(writer) || writer.length > 16) {
+          continue;
+        }
+        if (title.length < 2 || /현재위치/i.test(title)) {
+          continue;
+        }
+
+        // seq 매핑
+        let seq = seqMap.get(title);
+        if (!seq) {
+          // 공백 등 미세 차이가 있을 경우 유사 검색
+          for (let [tKey, sVal] of seqMap.entries()) {
+            if (tKey.includes(title) || title.includes(tKey)) {
+              seq = sVal;
+              break;
+            }
+          }
+        }
+
+        if (!seq) continue;
+
+        const id = `${board.name}_${seq}`;
+        if (results.some(p => p.id === id)) continue;
+
+        results.push({
+          id,
+          seq,
+          board: board.name,
+          title,
+          writer,
+          baseMobileUrl: board.mobileUrl,
+          baseDesktopUrl: board.url,
+        });
+      }
+    }
+  }
 
   console.log(`    └ [파싱 완료] ${board.name} -> 총 ${results.length}개 유효 매물 정제됨`);
   return results;
@@ -204,7 +204,7 @@ function parseList(html, board) {
 
 (async () => {
   console.log('====================================================');
-  console.log('[START] 바이크셀 8개 통합 장터 구동 엔진 (행별 텍스트 배열 스캔 방식)');
+  console.log('[START] 바이크셀 8개 통합 장터 구동 엔진 (완전 복구 라인 스캔 방식)');
   console.log('====================================================');
 
   const seen = loadSeenIds();
