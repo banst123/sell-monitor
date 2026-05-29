@@ -13,6 +13,9 @@ const __dirname = path.dirname(__filename);
 
 const TOKEN = process.env.TELEGRAM_TOKEN;
 const CHAT_ID = process.env.TELEGRAM_CHAT_ID;
+// GitHub 캐시 제어를 위한 환경변수 추가
+const GH_TOKEN = process.env.GITHUB_TOKEN;
+const GH_REPO = process.env.GITHUB_REPOSITORY; // 예: "유저명/레포명"
 
 if (!TOKEN || !CHAT_ID) {
   console.error('[FATAL] TELEGRAM_TOKEN 또는 TELEGRAM_CHAT_ID 환경변수가 없습니다.');
@@ -93,6 +96,79 @@ function sendTelegramMessage(text) {
   });
 }
 
+// 🎯 GitHub Actions 캐시를 체크하고 조건 충족 시 오래된 순으로 100개 삭제하는 함수
+function githubApiRequest(method, path, data = null) {
+  return new Promise((resolve, reject) => {
+    const payload = data ? JSON.stringify(data) : '';
+    const options = {
+      hostname: 'api.github.com',
+      path,
+      method,
+      headers: {
+        'User-Agent': 'NodeJS-Script',
+        'Authorization': `Bearer ${GH_TOKEN}`,
+        'Accept': 'application/vnd.github+json',
+        'X-GitHub-Api-Version': '2022-11-28'
+      }
+    };
+    if (data) {
+      options.headers['Content-Type'] = 'application/json';
+    }
+    const req = https.request(options, (res) => {
+      let body = '';
+      res.on('data', chunk => body += chunk);
+      res.on('end', () => {
+        if (res.statusCode >= 200 && res.statusCode < 300) {
+          resolve(body ? JSON.parse(body) : null);
+        } else {
+          reject(new Error(`GH API ${res.statusCode}: ${body}`));
+        }
+      });
+    });
+    req.on('error', reject);
+    if (data) req.write(payload);
+    req.end();
+  });
+}
+
+async function autoCleanCaches() {
+  if (!GH_TOKEN || !GH_REPO) {
+    console.log('\n[캐시 매니저] GITHUB_TOKEN 환경변수가 제공되지 않아 자동 청소 점검을 건너뜁니다.');
+    return;
+  }
+  
+  console.log('\n====================================================');
+  console.log('[캐시 매니저] 레포지토리 용량 및 캐시 최적화 점검 시작');
+  console.log('====================================================');
+  
+  try {
+    const resData = await githubApiRequest('GET', `/repos/${GH_REPO}/actions/caches?per_page=100`);
+    const totalCaches = resData.total_count || 0;
+    console.log(`· 현재 원격 서버에 적재된 캐시 총량: ${totalCaches}개 / 200개`);
+
+    if (totalCaches >= 200) {
+      console.log(`⚠️ [경보] 캐시 수량이 제한값(200개)에 도달했습니다! 자동 다이어트를 시작합니다.`);
+      
+      // 생성일(created_at) 기준 오래된 순으로 정렬
+      const sortedCaches = resData.actions_caches.sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+      // 상위 100개 타겟팅 추출
+      const deleteTargets = sortedCaches.slice(0, 100);
+      
+      console.log(`· 정리 대상: 가장 옛날에 생성된 캐시 100개 순차 삭제 개시...`);
+      
+      for (const cache of deleteTargets) {
+        await githubApiRequest('DELETE', `/repos/${GH_REPO}/actions/caches/${cache.id}`);
+      }
+      
+      console.log(`✨ [성공] 오래된 하위 캐시 100개 완전 삭제 완료. 쾌적한 환경을 유지합니다.`);
+    } else {
+      console.log(`· 상태 안전: 아직 보관 한계치(200개) 미만이므로 정리를 생략합니다.`);
+    }
+  } catch (err) {
+    console.error('[캐시 매니저 오류] 최적화 작업 중 에러 발생:', err.message);
+  }
+}
+
 function escapeHtml(text) {
   return (text || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
@@ -101,10 +177,7 @@ function parseList(html, board) {
   const $ = cheerio.load(html, { _root: true, xmlMode: false });
   const results = [];
   
-  const $trs = $('tr');
-  let validTrCount = 0;
-
-  $trs.each((_, tr) => {
+  $('tr').each((_, tr) => {
     const $tr = $(tr);
     const $links = $tr.find('a[href*="content.asp"]');
     if ($links.length === 0) return;
@@ -120,7 +193,6 @@ function parseList(html, board) {
     });
 
     if (!$titleLink) return;
-    validTrCount++;
 
     const href = $titleLink.attr('href') || '';
     const seqMatch = href.match(/(?:seq|no|dolseq)=(\d+)/i);
@@ -167,21 +239,15 @@ function parseList(html, board) {
     try {
       const html = await httpGet(board.url);
       const posts = parseList(html, board);
-      
       console.log(`   └ [파싱 완료] 총 ${posts.length}개의 매물 분석 완료.`);
       
       let newCountInBoard = 0;
       posts.forEach(post => {
         if (!newSeen.has(post.id)) {
-          // 캐시에 없는 진짜 새 글 발견 로그
           console.log(`      [★신규발견] ID: ${post.id} | 제목: ${post.title.substring(0, 25)}... | 작성자: ${post.writer}`);
           newPosts.push(post);
           newSeen.add(post.id);
           newCountInBoard++;
-        } else {
-          // 중복 차단되어 패스되는 로그 (디버깅용)
-          // 너무 무거워지지 않게 조절하려면 주석 처리해도 됩니다.
-          // console.log(`      [중복스킵] ID: ${post.id} (이미 캐시에 존재함)`);
         }
       });
       
@@ -190,9 +256,8 @@ function parseList(html, board) {
       } else {
         console.log(`   ➔ 결과: 업데이트된 새 글이 없습니다.`);
       }
-
     } catch (e) {
-      console.error(`   [🚨오류 발생] ${board.name} 연결 또는 파싱 실패:`, e.message);
+      console.error(`   [🚨오류 발생] ${board.name} 연결 실패:`, e.message);
     }
   }
 
@@ -201,7 +266,9 @@ function parseList(html, board) {
   console.log('====================================================');
 
   if (newPosts.length === 0) {
-    console.log('[INFO] 최종 전송할 새로운 글이 없으므로 프로세스를 종료합니다.');
+    console.log('[INFO] 최종 전송할 새로운 글이 없습니다.');
+    // 알림 보낼 글은 없어도 캐시 청소는 검사하고 종료합니다.
+    await autoCleanCaches();
     return;
   }
 
@@ -299,5 +366,7 @@ function parseList(html, board) {
     }
   }
 
+  // 모든 프로세스가 끝나고 마지막에 캐시 청소 실행
+  await autoCleanCaches();
   console.log('\n[FINISH] 모든 프로세스가 정상 종료되었습니다.');
 })();
