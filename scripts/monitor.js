@@ -19,7 +19,6 @@ if (!TOKEN || !CHAT_ID) {
   process.exit(1);
 }
 
-// 8개 장터를 안정적이고 빠르게 연결하기 위한 Keep-Alive 설정
 const keepAliveAgent = new https.Agent({ keepAlive: true, maxSockets: 8 });
 
 const BOARDS = [
@@ -28,8 +27,6 @@ const BOARDS = [
   { name: '산악 샥포크 중고장터', url: 'https://bikesell.co.kr/site/board/list.asp?doltop=MARKET&dolsection=MARKET3', mobileUrl: 'https://bikesell.co.kr/site/m/list.asp?doltop=MARKET&dolsection=MARKET3' },
   { name: '산악부속 중고장터', url: 'https://bikesell.co.kr/site/board/list.asp?doltop=MARKET&dolsection=MARKET4', mobileUrl: 'https://bikesell.co.kr/site/m/list.asp?doltop=MARKET&dolsection=MARKET4' },
   { name: '전기자전거 부품장터', url: 'https://bikesell.co.kr/site/board/list.asp?doltop=MARKET&dolsection=MARKET24', mobileUrl: 'https://bikesell.co.kr/site/m/list.asp?doltop=MARKET&dolsection=MARKET24' },
-  
-  // 🎯 새로 요청하신 장터 3종 추가 완료
   { name: '미니벨로 완성차장터', url: 'https://bikesell.co.kr/site/board/list.asp?doltop=MARKET&dolsection=MARKET31', mobileUrl: 'https://bikesell.co.kr/site/m/list.asp?doltop=MARKET&dolsection=MARKET31' },
   { name: '미니벨로 부품장터', url: 'https://bikesell.co.kr/site/board/list.asp?doltop=MARKET&dolsection=MARKET34', mobileUrl: 'https://bikesell.co.kr/site/m/list.asp?doltop=MARKET&dolsection=MARKET34' },
   { name: '전기자전거 완성차장터', url: 'https://bikesell.co.kr/site/board/list.asp?doltop=MARKET&dolsection=MARKET21', mobileUrl: 'https://bikesell.co.kr/site/m/list.asp?doltop=MARKET&dolsection=MARKET21' }
@@ -104,7 +101,10 @@ function parseList(html, board) {
   const $ = cheerio.load(html, { _root: true, xmlMode: false });
   const results = [];
   
-  $('tr').each((_, tr) => {
+  const $trs = $('tr');
+  let validTrCount = 0;
+
+  $trs.each((_, tr) => {
     const $tr = $(tr);
     const $links = $tr.find('a[href*="content.asp"]');
     if ($links.length === 0) return;
@@ -120,6 +120,7 @@ function parseList(html, board) {
     });
 
     if (!$titleLink) return;
+    validTrCount++;
 
     const href = $titleLink.attr('href') || '';
     const seqMatch = href.match(/(?:seq|no|dolseq)=(\d+)/i);
@@ -155,27 +156,52 @@ function parseList(html, board) {
   console.log('====================================================');
 
   const seen = loadSeenIds();
+  console.log(`[시스템] 현재 메모리에 로드된 기존 캐시 글 개수: ${seen.size}개`);
+  
   const newSeen = new Set(seen);
   const newPosts = [];
   const FILTER_CONFIG = loadFilterConfig();
 
   for (const board of BOARDS) {
+    console.log(`\n[진입] 장터 접속 중: ${board.name}`);
     try {
       const html = await httpGet(board.url);
       const posts = parseList(html, board);
-      for (const post of posts) {
+      
+      console.log(`   └ [파싱 완료] 총 ${posts.length}개의 매물 분석 완료.`);
+      
+      let newCountInBoard = 0;
+      posts.forEach(post => {
         if (!newSeen.has(post.id)) {
+          // 캐시에 없는 진짜 새 글 발견 로그
+          console.log(`      [★신규발견] ID: ${post.id} | 제목: ${post.title.substring(0, 25)}... | 작성자: ${post.writer}`);
           newPosts.push(post);
           newSeen.add(post.id);
+          newCountInBoard++;
+        } else {
+          // 중복 차단되어 패스되는 로그 (디버깅용)
+          // 너무 무거워지지 않게 조절하려면 주석 처리해도 됩니다.
+          // console.log(`      [중복스킵] ID: ${post.id} (이미 캐시에 존재함)`);
         }
+      });
+      
+      if (newCountInBoard > 0) {
+        console.log(`   ➔ 결과: ${board.name}에서 새 글 ${newCountInBoard}건 추가 수집됨`);
+      } else {
+        console.log(`   ➔ 결과: 업데이트된 새 글이 없습니다.`);
       }
+
     } catch (e) {
-      console.error(`[오류 스킵] ${board.name} 연결 실패`);
+      console.error(`   [🚨오류 발생] ${board.name} 연결 또는 파싱 실패:`, e.message);
     }
   }
 
+  console.log('\n====================================================');
+  console.log(`[알림단계] 검사 완료. 전송 대기 중인 새 글 총합: ${newPosts.length}건`);
+  console.log('====================================================');
+
   if (newPosts.length === 0) {
-    console.log('[INFO] 새로운 글이 없습니다.');
+    console.log('[INFO] 최종 전송할 새로운 글이 없으므로 프로세스를 종료합니다.');
     return;
   }
 
@@ -273,5 +299,5 @@ function parseList(html, board) {
     }
   }
 
-  console.log('\n[FINISH] 모니터링 완료.');
+  console.log('\n[FINISH] 모든 프로세스가 정상 종료되었습니다.');
 })();
