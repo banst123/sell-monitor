@@ -117,62 +117,75 @@ function escapeHtml(text) {
   return (text || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
-// 🎯 [완전 개편] 이전 대화 방식의 텍스트 기반 전체 스캔 파서
+// 🎯 [핵심] 행 단위의 순수 텍스트 배열 매칭 알고리즘
 function parseList(html, board) {
   const $ = cheerio.load(html);
   const results = [];
 
-  // HTML 태그와 상관없이 본문 텍스트 전체를 하나로 병합
-  const pageText = $('body').text();
-  
-  // 개별 게시글의 seq 번호 매칭을 위한 링크 맵 미리 생성
-  const seqMap = new Map();
-  $('a[href*="content.asp"]').each((_, el) => {
-    const href = $(el).attr('href') || '';
-    const seqMatch = href.match(/(?:seq|no|dolseq)=(\d+)/i);
-    if (seqMatch) {
-      const titleText = $(el).text().replace(/\s+/g, ' ').trim();
-      if (titleText.length > 1 && !href.includes('WatchList.asp')) {
-        seqMap.set(titleText, seqMatch[1]);
+  $('tr').each((_, tr) => {
+    const $tr = $(tr);
+    
+    // 1단계: 게시글 본문 링크가 존재하는 행인지 먼저 검증
+    const $links = $tr.find('a[href*="content.asp"]');
+    if ($links.length === 0) return;
+
+    let $titleLink = null;
+    let seq = null;
+
+    $links.each((_, a) => {
+      const $a = $(a);
+      const href = $a.attr('href') || '';
+      if (!href.includes('WatchList.asp')) {
+        const seqMatch = href.match(/(?:seq|no|dolseq)=(\d+)/i);
+        if (seqMatch) {
+          seq = seqMatch[1];
+          $titleLink = $a;
+          return false;
+        }
       }
-    }
-  });
+    });
 
-  // 🎯 바이크셀 고유의 텍스트 덤프 흐름 추적 정규식
-  // [제목] -> [댓글수 옵션] -> [조회수(숫자)] -> [작성자(텍스트)] -> [날짜(YYYY-MM-DD 또는 시간)]
-  const postRegex = /([^\n▒]+)(?:\[\s*\d+\s*\])?\s*(\d+)([a-zA-Z가-힣0-9_]+)\s*(\d{4}-\d{2}-\d{2}|(?:오전|오후)\s*\d+:\d+|\d{2}:\d{2})/g;
+    if (!seq || !$titleLink) return;
 
-  let match;
-  while ((match = postRegex.exec(pageText)) !== null) {
-    let title = match[1].replace(/\s+/g, ' ').trim();
-    const hitCount = match[2]; // 조회수 분리용
-    let writer = match[3].trim();
-    const dateStr = match[4];
+    // 2단계: 행 내부의 모든 텍스트 요소를 배열로 쪼개기
+    // 공백을 다듬고 빈 아이템을 제거하여 깨끗한 텍스트 뭉치 배열 확보
+    const cellTexts = $tr.find('td').map((_, td) => {
+      return $(td).text().replace(/\s+/g, ' ').trim();
+    }).get().filter(t => t.length > 0);
 
-    // 시스템 예약어 걸러내기
-    if (/중고|장터|산악|완성차|부속|부품|댓글|공지|조회|추천|로그인/i.test(writer) || writer.length > 16) {
-      continue;
-    }
-    if (title.length < 2 || /현재위치/i.test(title)) {
-      continue;
-    }
+    if (cellTexts.length < 3) return;
 
-    // 미리 확보한 제목 맵에서 seq 추출, 실패시 제목 문자열 자체에서 유사 매칭 시도
-    let seq = seqMap.get(title);
-    if (!seq) {
-      for (let [tKey, sVal] of seqMap.entries()) {
-        if (tKey.includes(title) || title.includes(tKey)) {
-          seq = sVal;
-          break;
+    // 3단계: 제목 정제 (댓글수 제거)
+    let title = $titleLink.text().replace(/\s+/g, ' ').trim();
+    title = title.replace(/\[\s*\d+\s*\]$/, '').trim();
+    if (!title || title.length < 2 || /현재위치/i.test(title)) return;
+
+    // 4단계: 날짜/시간 포맷이 들어있는 칸을 기준으로 작성자 역추적
+    const dateRegex = /(\d{4}-\d{2}-\d{2})|((오전|오후)\s*\d+:\d+)|(^\d{2}:\d{2}$)/;
+    let writer = '일반판매자';
+
+    for (let i = 0; i < cellTexts.length; i++) {
+      if (dateRegex.test(cellTexts[i])) {
+        // 보통 날짜 칸 바로 앞(i-1)이 작성자(닉네임) 칸입니다.
+        if (i > 0) {
+          let rawWriter = cellTexts[i - 1];
+          
+          // '로그인유지' 지우기 및 조회수가 이름 앞에 들러붙은 현상 분리
+          rawWriter = rawWriter.replace(/로그인유지/g, '').trim();
+          if (/^\d+[a-zA-Z가-힣]/.test(rawWriter)) {
+            rawWriter = rawWriter.replace(/^\d+/, ''); // 앞쪽 조회수 숫자 완벽 커트
+          }
+
+          if (rawWriter && !/중고|장터|산악|완성차|부속|부품|댓글|공지|조회|추천/i.test(rawWriter) && rawWriter.length <= 16) {
+            writer = rawWriter;
+            break;
+          }
         }
       }
     }
-    
-    if (!seq) continue; // 링크 주소를 맵핑할 수 없는 글은 제외
 
     const id = `${board.name}_${seq}`;
-
-    if (results.some(p => p.id === id)) continue;
+    if (results.some(p => p.id === id)) return;
 
     results.push({
       id,
@@ -183,7 +196,7 @@ function parseList(html, board) {
       baseMobileUrl: board.mobileUrl,
       baseDesktopUrl: board.url,
     });
-  }
+  });
 
   console.log(`    └ [파싱 완료] ${board.name} -> 총 ${results.length}개 유효 매물 정제됨`);
   return results;
@@ -191,7 +204,7 @@ function parseList(html, board) {
 
 (async () => {
   console.log('====================================================');
-  console.log('[START] 바이크셀 8개 통합 장터 구동 엔진 (텍스트 덤프 서치 방식)');
+  console.log('[START] 바이크셀 8개 통합 장터 구동 엔진 (행별 텍스트 배열 스캔 방식)');
   console.log('====================================================');
 
   const seen = loadSeenIds();
