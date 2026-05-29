@@ -4,6 +4,11 @@ on:
   # 외부 크론(1시간 주기) 또는 GitHub 웹에서 수동 실행
   workflow_dispatch:
 
+# 🎯 캐시 제어 API를 호출하기 위해 Actions write 권한을 명시적으로 부여합니다.
+permissions:
+  actions: write
+  contents: read
+
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
@@ -35,10 +40,10 @@ jobs:
         run: npm ci
 
       - name: Run monitor script
+        # 🎯 모든 환경변수를 env: 블록 내부에 올바른 들여쓰기(Indent)로 통합했습니다.
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: node scripts/monitor.js
-# 👇 코드 내부의 autoCleanCaches()가 인지할 수 있게 시스템 변수를 주입합니다.
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_REPOSITORY: ${{ github.repository }}
+        run: node scripts/monitor.js
