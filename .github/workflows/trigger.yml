@@ -15,20 +15,20 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
 
-      # 🎯 기존 npm ci 대신 npm install로 수정하여 동기화 오류 방지
       - name: Install Dependencies
         run: npm install
 
+      # 🎯 scripts/ 폴더 내부의 스캐너 실행
       - name: Run Main Scanner
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: node index.js
+        run: node scripts/index.js # 👈 만약 파일명이 다르면 scripts/scan-backup.js 형태로 맞춰주세요.
 
-      # 💡 스캔 진행 시 갱신되는 데이터 파일(bhunt_*.json)을 GitHub에 자동 저장
+      # 💡 스캔 완료 후 갱신된 DB 파일(bhunt_*.json)을 GitHub에 자동 커밋 및 푸시
       - name: Commit and push updated DB files
         run: |
           git config --global user.name "github-actions[bot]"
