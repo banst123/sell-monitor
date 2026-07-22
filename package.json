@@ -2,9 +2,10 @@
   "name": "bikesell-scan",
   "version": "1.0.0",
   "type": "module",
-  "description": "",
-  "main": "index.js",
+  "description": "BikeSell Market Monitoring Crawler",
+  "main": "scripts/monitor.js",
   "scripts": {
+    "start": "node scripts/monitor.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
@@ -13,8 +14,8 @@
   "dependencies": {
     "@google/genai": "^2.8.0",
     "axios": "^1.18.0",
-    "cheerio": "^1.0.0",
-    "dotenv": "^16.0.0",
+    "cheerio": "^1.0.0-rc.12",
+    "dotenv": "^16.4.5",
     "iconv-lite": "^0.6.3",
     "node-cron": "^4.2.1",
     "playwright": "^1.60.0"
