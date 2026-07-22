@@ -24,12 +24,21 @@ jobs:
         with:
           node-version: 24
 
-      # ⚡ 요청하신 npm install 방식으로 의존성 설치
+      # ⚡ Playwright 브라우저 캐시 설정
+      - name: Cache Playwright Browsers
+        id: cache-playwright
+        uses: actions/cache@v4.2.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-${{ hashFiles('package-lock.json') }}
+
+      # ⚡ 요청하신 npm install 구문 구동
       - name: Install dependencies
         run: npm install
 
-      # ⚡ Playwright 브라우저 바이너리 설치
-      - name: Install Playwright browsers
+      # ⚡ 캐시 미스(Cache Miss) 발생 시에만 설치 진행
+      - name: Install Playwright Browsers
+        if: steps.cache-playwright.outputs.cache-hit != 'true'
         run: npx playwright install --with-deps chromium
 
       - name: Run monitor script
