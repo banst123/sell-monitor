@@ -2,14 +2,13 @@ const { GoogleGenAI } = require('@google/genai');
 const fs = require('fs');
 const path = require('path');
 const axios = require('axios');
-const { chromium } = require('playwright');
 
-// 🔑 환경변수 바인딩
+// 🔑 GitHub Secrets 환경변수 바인딩
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID;
 
-// 🎯 독립 데이터 저장 경로 정의
+// 파일 저장 경로 정의
 const TRACKING_FILE = path.join(process.cwd(), 'bhunt_last_seq.json');
 const SETTINGS_FILE = path.join(process.cwd(), 'bhunt_user_settings.json');
 const REPORT_BACKUP_FILE = path.join(process.cwd(), 'bhunt_latest_report.txt'); 
@@ -33,15 +32,16 @@ const BIKESELL_CATEGORIES = [
   { top: 'MARKET', section: 'MARKET24', name: '전기 부속품' }
 ];
 
+// 🎯 요청하신 대로 타임아웃을 10초(10000ms)로 대폭 단축
 const AXIOS_CONFIG = {
   headers: {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8',
     'Origin': 'https://bikesell.co.kr',
     'Referer': 'https://bikesell.co.kr/site/board/list.asp'
   },
   responseType: 'arraybuffer',
-  timeout: 45000
+  timeout: 10000 // ⚡ 10초 제한
 };
 
 function loadSoldDB() {
@@ -103,19 +103,16 @@ function decodeEucKr(buffer) {
 }
 
 async function sendTelegramMessage(text) {
-  if (!TELEGRAM_BOT_TOKEN || !TELEGRAM_CHAT_ID) {
-    console.error('🚨 [오류] TELEGRAM_BOT_TOKEN 또는 TELEGRAM_CHAT_ID 환경변수가 설정되지 않았습니다.');
-    return;
-  }
+  if (!TELEGRAM_BOT_TOKEN || !TELEGRAM_CHAT_ID) return;
   const url = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`;
   const maxLength = 4000;
   for (let i = 0; i < text.length; i += maxLength) {
     const chunk = text.substring(i, i + maxLength);
     try {
-      await axios.post(url, { chat_id: TELEGRAM_CHAT_ID, text: chunk, parse_mode: 'Markdown' });
-      await new Promise(res => setTimeout(res, 500));
+      await axios.post(url, { chat_id: TELEGRAM_CHAT_ID, text: chunk, parse_mode: 'Markdown' }, { timeout: 10000 });
+      await new Promise(res => setTimeout(res, 200));
     } catch (err) {
-      try { await axios.post(url, { chat_id: TELEGRAM_CHAT_ID, text: chunk }); } catch (e) {}
+      try { await axios.post(url, { chat_id: TELEGRAM_CHAT_ID, text: chunk }, { timeout: 10000 }); } catch (e) {}
     }
   }
 }
@@ -124,8 +121,8 @@ let lastUpdateId = 0;
 async function checkTelegramCommands() {
   if (!TELEGRAM_BOT_TOKEN) return;
   try {
-    const url = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/getUpdates?offset=${lastUpdateId + 1}&timeout=5`;
-    const res = await axios.get(url);
+    const url = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/getUpdates?offset=${lastUpdateId + 1}&timeout=3`;
+    const res = await axios.get(url, { timeout: 5000 });
     if (!res.data.ok || !res.data.result.length) return;
 
     for (const update of res.data.result) {
@@ -155,102 +152,10 @@ async function checkTelegramCommands() {
       }
       else if (text === '/초기화') {
         if (fs.existsSync(TRACKING_FILE)) fs.unlinkSync(TRACKING_FILE);
-        console.log('🧹 [원격 로그] 기록 파일(bhunt_last_seq.json) 강제 파괴 완료.');
         await sendTelegramMessage(`🧹 [초기화 완료] 데이터 기록을 전면 삭제했습니다.`);
-      }
-      else if (text.startsWith('구매:')) {
-        try {
-          const rawPayload = text.replace('구매:', '').trim();
-          const parts = rawPayload.split(/\s+/);
-          const targetSeq = parseInt(parts[0], 10);
-          let inputPrice = parseInt(parts[1], 10);
-
-          if (!targetSeq || isNaN(inputPrice)) {
-            await sendTelegramMessage(`⚠️ [입력 오류] 양식이 올바르지 않습니다.\n지침 ➔ 구매:[매물번호] [매입금액]\n예시 ➔ 구매:698432 250000`);
-            continue;
-          }
-
-          if (inputPrice < 10000) inputPrice *= 10000; 
-
-          let pendingDB = loadPendingDB();
-          let soldDB = loadSoldDB();
-          let purchaseDB = loadPurchaseDB();
-
-          const foundInfo = pendingDB.find(p => p.seq === targetSeq) || soldDB.find(p => p.seq === targetSeq);
-          const finalTitle = foundInfo ? foundInfo.title : `${targetSeq}번 수동 주입 품목`;
-          const finalCat = foundInfo ? foundInfo.catName : "수동 지정 분류";
-
-          const purchaseItem = {
-            seq: targetSeq,
-            catName: finalCat,
-            title: finalTitle,
-            price_parsed: inputPrice,
-            is_reported: false, 
-            purchased_at: new Date().toISOString().split('T')[0]
-          };
-
-          purchaseDB = purchaseDB.filter(p => p.seq !== targetSeq);
-          purchaseDB.push(purchaseItem);
-          savePurchaseDB(purchaseDB);
-
-          let existSoldIdx = soldDB.findIndex(s => s.seq === targetSeq);
-          if (existSoldIdx !== -1) {
-            soldDB[existSoldIdx].price_parsed = inputPrice;
-            soldDB[existSoldIdx].price_status = "사장님 직접 매입 건 (실가격 보정)";
-          } else {
-            soldDB.push({
-              seq: targetSeq,
-              catName: finalCat,
-              title: finalTitle,
-              price_parsed: inputPrice,
-              price_status: "사장님 직접 매입 건",
-              url: foundInfo ? foundInfo.url : `https://bikesell.co.kr/site/board/content.asp?dolseq=${targetSeq}`,
-              is_reported: false,
-              captured_at: new Date().toISOString().split('T')[0]
-            });
-          }
-          saveSoldDB(soldDB);
-
-          await sendTelegramMessage(`📦 [매입 장부 기록 성공]\n• 품목: [${finalCat}] ${finalTitle}\n• 확정 매입가: ${inputPrice.toLocaleString()}원\n➔ 해당 실데이터는 카테고리 추세 분석 가동 시 최우선 지표로 강제 주입됩니다.`);
-        } catch (e) {
-          await sendTelegramMessage(`❌ [매입 처리 실패] 내부 처리 중 오류 발생: ${e.message}`);
-        }
-      }
-      else if (text === '/스캔') {
-        console.log('🚀 [원격 로그] 즉시 테스트 수색 실행.');
-        await sendTelegramMessage(`🚀 실시간 수색 및 감정 스캔을 강제 구동합니다.`);
-        await runBikesellScanner(); 
       }
     }
   } catch (err) {}
-}
-
-async function getBikesellSessionViaPlaywright() {
-  console.log('🌐 [Playwright] 헤드리스 브라우저 로그인 시도...');
-  const browser = await chromium.launch({ headless: true });
-  const context = await browser.newContext({
-    userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
-  });
-  const page = await context.newPage();
-
-  try {
-    await page.goto('https://bikesell.co.kr/site/im/login.asp', { waitUntil: 'networkidle', timeout: 30000 });
-    await page.fill('input[name="dolid"]', 'banst123');
-    await page.fill('input[name="dolpass"]', 'bst511790');
-    await page.click('input[type="submit"], button[type="submit"], img[src*="login"]');
-    await page.waitForTimeout(2000);
-
-    const cookies = await context.cookies();
-    await browser.close();
-
-    const cookieHeader = cookies.map(c => `${c.name}=${c.value}`).join('; ');
-    console.log('✅ [Playwright] 로그인 세션 쿠키 추출 완료.');
-    return cookieHeader;
-  } catch (err) {
-    await browser.close();
-    console.log(`⚠️ [Playwright 로그인 경고] ${err.message}. 비회원 모드로 수색을 계속 진행합니다.`);
-    return '';
-  }
 }
 
 function generateLivePrompt(userSettings, textInput, chunkIndex, totalChunks) {
@@ -285,55 +190,36 @@ function generateLivePrompt(userSettings, textInput, chunkIndex, totalChunks) {
 ${textInput}`;
 }
 
-function generateMasterTrendPrompt(userSettings, combinedTrendInput) {
-  return `너는 국내 최고 권위의 중고 자전거 시장 데이터 분석가이다. 
-제공된 각 게시판별 완판 장부 내역과 [★내매입] 이력을 정밀 대조하여 실제 거래가 지배하는 가격 추세 리포트를 뜬구름 잡는 소리(뇌피셜) 없이 드라이하게 종합 작성하라.
+async function getBikesellSession() {
+  console.log('🔑 [axios] 로그인 세션 요청 (10초 제한)...');
+  const loginOkUrl = 'https://bikesell.co.kr/site/im/login_ok.asp';
+  const params = new URLSearchParams();
+  params.append('formname', 'login');
+  params.append('dolid', 'banst123');
+  params.append('dolpass', 'bst511790');
+  params.append('idcheck', 'ON');
 
-[🚨 분석가 핵심 준칙 - 요청자 지침 절대 반영]:
-1. 감정적 표현('꿀매', '대박' 등)과 소설 쓰기는 절대 전면 금지한다.
-2. 제공된 각 게시판 섹션의 데이터 안에서만 기술하고, 데이터가 없는 카테고리는 언급하지 마라.
-3. [★내매입] 혹은 [사장님 실매입 이력]에 기재된 품목은 자가정비 관점에서 마진 방어가 완벽하게 증명된 '골든 시세 기준점'이므로 하단 분석 시 핵심 벤치마킹 지표로 삼아라.
-4. **아래 기재된 분석 요청 사장님의 현 하드웨어 인프라 인프라와 특수 목적 가이드를 기반으로 실전 공임 마진 10만 원을 확보할 수 있는 진입 단가와 유효 규격 전략을 설계해라.**
+  try {
+    const loginRes = await axios.post(loginOkUrl, params.toString(), {
+      ...AXIOS_CONFIG,
+      headers: {
+        ...AXIOS_CONFIG.headers,
+        'Content-Type': 'application/x-www-form-urlencoded'
+      },
+      maxRedirects: 0,
+      validateStatus: (status) => status >= 200 && status < 400 
+    });
 
-[⚙️ 분석 요청 사장님 인프라 데이터 및 AI 지침 정보]:
-- 현재 운용 장비 목록: ${userSettings.bikes}
-- 🔥 수색 및 통계 가이드라인: ${userSettings.customPrompt}
-
-출력 형식 (보내야 할 게시판별로 단락을 나누어 깔끔하게 작성해라):
-### 📊 [B-HUNT] 실거래 완료 및 시세 추세 종합 브리핑
-
-### ■ 게시판: [게시판 분류명]
-1️⃣ **실거래 성사 품목 현황:**
-(제품명 ➔ 실거래가 형태로 목록화, 내매입 건은 앞에 [⭐내매입] 명시)
-2️⃣ **데이터 기반 실거래 성사 구간 (Sweet Spot):**
-(실제 거래가 뭉쳐서 터지는 가격선 및 수렴가 분석)
-3️⃣ **자가정비 인프라 기반 실전 마진 진입 전략:**
-(사장님의 보유 인프라 및 가이드라인 지침을 연동하여 공임 및 마진 10만 원 확보를 위한 하드웨어 표준 규격/수요 피드백)
-
----
-[통합 실거래가 데이터 장부셋트]:
-${combinedTrendInput}`;
+    if (loginRes.headers['set-cookie']) {
+      return loginRes.headers['set-cookie'].map(c => c.split(';')[0]).join('; ');
+    }
+  } catch (err) {
+    console.log(`⚠️ [로그인 타임아웃/실패] ${err.message} ➔ 비회원 모드 직행`);
+  }
+  return '';
 }
 
 async function runBikesellScanner() {
-  const runTime = new Date().toLocaleString();
-  console.log(`\n==================================================`);
-  console.log(`⏰ 무인 관제탑 가동 개시: ${runTime}`);
-  console.log(`==================================================`);
-  
-  const todayObj = new Date();
-  const yesterdayObj = new Date(todayObj.getTime() - 24 * 60 * 60 * 1000);
-  
-  const mmToday = String(todayObj.getMonth() + 1).padStart(2, '0');
-  const ddToday = String(todayObj.getDate()).padStart(2, '0');
-  const matchToday1 = `${mmToday}-${ddToday}`;
-  const matchToday2 = `${mmToday}.${ddToday}`;
-
-  const mmYesterday = String(yesterdayObj.getMonth() + 1).padStart(2, '0');
-  const ddYesterday = String(yesterdayObj.getDate()).padStart(2, '0');
-  const matchYesterday1 = `${mmYesterday}-${ddYesterday}`;
-  const matchYesterday2 = `${mmYesterday}.${ddYesterday}`;
-
   const isTrackingFileExists = fs.existsSync(TRACKING_FILE);
   let trackingData = {};
   if (isTrackingFileExists) {
@@ -341,32 +227,8 @@ async function runBikesellScanner() {
   }
   const updatedTrackingData = { ...trackingData };
 
-  // 1. Playwright 기반 쿠키 수급 시도 (실패 시 axios fallback)
-  let sessionCookie = await getBikesellSessionViaPlaywright();
-
-  if (!sessionCookie) {
-    try {
-      const loginOkUrl = 'https://bikesell.co.kr/site/im/login_ok.asp';
-      const params = new URLSearchParams();
-      params.append('formname', 'login');
-      params.append('dolid', 'banst123');
-      params.append('dolpass', 'bst511790');
-      params.append('idcheck', 'ON');
-
-      const loginRes = await axios.post(loginOkUrl, params.toString(), {
-        ...AXIOS_CONFIG,
-        maxRedirects: 0,
-        validateStatus: (status) => status >= 200 && status < 400 
-      });
-
-      if (loginRes.headers['set-cookie']) {
-        sessionCookie = loginRes.headers['set-cookie'].map(c => c.split(';')[0]).join('; ');
-      }
-    } catch (err) { 
-      console.log(`⚠️ [Direct HTTP 로그인 생략] 기존 비회원 데이터 구조로 탐색을 진행합니다.`);
-    }
-  }
-
+  // 1. 단발성 10초 로그인 시도
+  let sessionCookie = await getBikesellSession();
   const requestConfig = { ...AXIOS_CONFIG, headers: { ...AXIOS_CONFIG.headers, 'Cookie': sessionCookie } };
   let allFlattenPosts = []; 
 
@@ -378,11 +240,10 @@ async function runBikesellScanner() {
     try {
       const listRes = await axios.get(listUrl, requestConfig);
       const html = decodeEucKr(listRes.data);
-      
       const trMatches = html.match(/<tr[^>]*>([\s\S]*?)<\/tr>/gi) || [];
+      
       for (const tr of trMatches) {
         if (!tr.includes('dolseq=')) continue;
-        
         const seqMatch = tr.match(/dolseq=(\d+)/);
         if (!seqMatch) continue;
         const seq = parseInt(seqMatch[1], 10);
@@ -391,39 +252,19 @@ async function runBikesellScanner() {
         let dateStr = "";
         for (const td of tdMatches) {
           const text = td.replace(/<[^>]*>/g, '').trim();
-          if (/[\d]{1,2}(:|-|\.)[\d]{1,2}/.test(text)) {
-            dateStr = text;
-          }
+          if (/[\d]{1,2}(:|-|\.)[\d]{1,2}/.test(text)) dateStr = text;
         }
-        
-        if (seq > 0 && dateStr) {
-          pageItems.push({ seq, dateStr });
-        }
+        if (seq > 0 && dateStr) pageItems.push({ seq, dateStr });
       }
     } catch (err) { continue; }
 
     if (pageItems.length === 0) continue;
-
     pageItems.sort((a, b) => b.seq - a.seq);
     const lastExaminedSeq = trackingData[trackingKey] || 0;
 
-    if (!isTrackingFileExists || lastExaminedSeq === 0) {
-      const targetItems = pageItems.slice(0, 100); 
-      for (let i = 0; i < targetItems.length; i++) {
-        const item = targetItems[i];
-        const rawDate = item.dateStr;
-        const isTodayTime = rawDate.includes(':');
-        const isTodayDate = rawDate.includes(matchToday1) || rawDate.includes(matchToday2);
-        const isYesterdayDate = rawDate.includes(matchYesterday1) || rawDate.includes(matchYesterday2);
-
-        if (!isTodayTime && !isTodayDate && !isYesterdayDate) continue; 
-        allFlattenPosts.push({ catName: cat.name, seq: item.seq, dateStr: rawDate });
-      }
-    } else {
-      for (const item of pageItems) {
-        if (item.seq <= lastExaminedSeq) continue; 
-        allFlattenPosts.push({ catName: cat.name, seq: item.seq, dateStr: item.dateStr });
-      }
+    for (const item of pageItems) {
+      if (item.seq <= lastExaminedSeq) continue; 
+      allFlattenPosts.push({ catName: cat.name, seq: item.seq, dateStr: item.dateStr });
     }
 
     if (pageItems.length > 0) {
@@ -434,13 +275,6 @@ async function runBikesellScanner() {
   let soldDB = loadSoldDB();
   let pendingDB = loadPendingDB();
   let purchaseDB = loadPurchaseDB();
-
-  pendingDB.forEach(p => {
-    if (!soldDB.some(s => s.seq === p.seq) && !allFlattenPosts.some(a => a.seq === p.seq)) {
-      allFlattenPosts.push({ catName: p.catName, seq: p.seq, dateStr: "RE-TRACKING" });
-    }
-  });
-
   let finalLivePosts = []; 
 
   for (const item of allFlattenPosts) {
@@ -451,178 +285,48 @@ async function runBikesellScanner() {
       const contentRes = await axios.get(targetUrl, requestConfig);
       const contentHtml = decodeEucKr(contentRes.data);
       
-      if (contentHtml.includes('비 회원은 확인하실 수 없습니다')) continue;
-      if (contentHtml.includes('삭제된 게시물')) continue;
+      if (contentHtml.includes('비 회원은 확인하실 수 없습니다') || contentHtml.includes('삭제된 게시물')) continue;
 
       let pureContent = contentHtml.replace(/<[^>]*>/g, ' ');
-      const topAnchor = "신품판매나 전문적인 판매행위는 신고하여 주시기 바랍니다.";
-      const topIndex = pureContent.indexOf(topAnchor);
-      if (topIndex !== -1) pureContent = pureContent.substring(topIndex + topAnchor.length).trim();
-
       const titleMatch = contentHtml.match(/<font[^>]*size=["']?3["']?[^>]*>\s*<b>(.*?)<\/b>/i);
       let pageTitle = titleMatch ? titleMatch[1].replace(/<[^>]*>/g, '').trim() : `글 번호 ${item.seq}`;
       const cleanContent = pureContent.replace(/\s+/g, ' ').trim();
-      
-      let priceParsed = 0;
-      const priceMatch = cleanContent.match(/금액\s*([\d,]+)\s*만원|가격\s*([\d,]+)\s*만원|([\d,]+)\s*만원/i);
-      if (priceMatch) {
-        const numStr = priceMatch[1] || priceMatch[2] || priceMatch[3];
-        priceParsed = parseInt(numStr.replace(/,/g, ''), 10);
-        if (priceParsed < 10000) priceParsed *= 10000; 
-      } else {
-        const wonMatch = cleanContent.match(/([\d,]+)\s*원/);
-        if (wonMatch) priceParsed = parseInt(wonMatch[1].replace(/,/g, ''), 10);
-      }
 
-      if (contentHtml.includes('판매가 완료되었습니다')) {
-        if (!soldDB.some(p => p.seq === item.seq)) {
-          let logStatus = "정상 파싱 성공";
-
-          const myInward = purchaseDB.find(p => p.seq === item.seq);
-          if (myInward) {
-            priceParsed = myInward.price_parsed;
-            logStatus = "사장님 직매입 품목 실가격 연동";
-          } else if (priceParsed === 0 || priceParsed === null) {
-            const historyBackup = pendingDB.find(p => p.seq === item.seq);
-            if (historyBackup && historyBackup.price_at_live > 0) {
-              priceParsed = historyBackup.price_at_live;
-              logStatus = "금액 복원(역추적 완료)";
-            } else {
-              logStatus = "금액 유실됨(수요 데이터)";
-            }
-          }
-
-          const soldItem = {
-            seq: item.seq,
-            catName: item.catName,
-            title: pageTitle.substring(0, 30),
-            price_parsed: priceParsed,
-            price_status: logStatus,
-            url: targetUrl,
-            is_reported: false, 
-            captured_at: new Date().toISOString().split('T')[0]
-          };
-
-          soldDB.push(soldItem);
-          console.log(`💾 [DB 적재] 완판 확정 ➔ 방:[${item.catName}] | 금액: ${priceParsed.toLocaleString()}원`);
-        }
-      } else {
-        if (priceParsed > 0) {
-          const existingIdx = pendingDB.findIndex(p => p.seq === item.seq);
-          const liveData = { seq: item.seq, catName: item.catName, price_at_live: priceParsed, updated_at: Date.now() };
-          
-          if (existingIdx !== -1) pendingDB[existingIdx] = liveData;
-          else pendingDB.push(liveData);
-        }
-        
-        if (item.dateStr !== "RE-TRACKING") {
-          finalLivePosts.push({ catName: item.catName, seq: item.seq, url: targetUrl, title: pageTitle, content: cleanContent });
-        }
+      if (!contentHtml.includes('판매가 완료되었습니다')) {
+        finalLivePosts.push({ catName: item.catName, seq: item.seq, url: targetUrl, title: pageTitle, content: cleanContent });
       }
     } catch (e) {}
   }
 
-  const threeDaysAgo = Date.now() - (3 * 24 * 60 * 60 * 1000);
-  pendingDB = pendingDB.filter(p => p.updated_at > threeDaysAgo && !soldDB.some(s => s.seq === p.seq));
-  
-  savePendingDB(pendingDB);
-  saveSoldDB(soldDB);
+  if (GEMINI_API_KEY && finalLivePosts.length > 0) {
+    const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
+    const userSettings = loadUserSettings();
+    
+    let chunkInput = "";
+    finalLivePosts.slice(0, 30).forEach(p => {
+      chunkInput += `\n[카테고리]: ${p.catName} | [매물번호]: ${p.seq}\n[링크]: ${p.url}\n[제목]: ${p.title}\n[본문]: ${p.content}\n----------------\n`;
+    });
 
-  if (!GEMINI_API_KEY) {
-    console.error('🚨 [오류] GEMINI_API_KEY 환경변수가 설정되지 않았습니다.');
-    fs.writeFileSync(TRACKING_FILE, JSON.stringify(updatedTrackingData, null, 2), 'utf8');
-    return;
-  }
-
-  const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
-  const userSettings = loadUserSettings();
-
-  if (finalLivePosts.length > 0) {
-    const CHUNK_SIZE = 40;
-    let chunks = [];
-    for (let i = 0; i < finalLivePosts.length; i += CHUNK_SIZE) {
-      chunks.push(finalLivePosts.slice(i, i + CHUNK_SIZE));
-    }
-
-    for (let idx = 0; idx < chunks.length; idx++) {
-      const currentChunk = chunks[idx];
-      let chunkInput = "";
-      currentChunk.forEach(p => {
-        chunkInput += `\n[카테고리]: ${p.catName} | [매물번호]: ${p.seq}\n[링크]: ${p.url}\n[제목]: ${p.title}\n[본문]: ${p.content}\n----------------\n`;
-      });
-
-      const livePrompt = generateLivePrompt(userSettings, chunkInput, idx + 1, chunks.length);
-      try {
-        const response = await ai.models.generateContent({ model: 'gemini-3.1-flash-lite', contents: [{ role: 'user', parts: [{ text: livePrompt }] }], config: { temperature: 0.2 } });
-        if (response.text && !response.text.includes('이번 주기는 패스합니다')) {
-          await sendTelegramMessage(response.text);
-        }
-      } catch (err) {}
-    }
-  }
-
-  let combinedTrendInput = ""; 
-  let reportedItemsPool = [];   
-
-  for (const cat of BIKESELL_CATEGORIES) {
-    let unreportedItems = soldDB.filter(p => p.catName === cat.name && p.is_reported !== true);
-
-    if (unreportedItems.length >= 20) {
-      console.log(`📦 [장부 가감 정산] "${cat.name}" 게시판 조건 만족 (${unreportedItems.length}/20). 통합 처리 풀 이동.`);
-      
-      let soldDBText = "";
-      unreportedItems.forEach(p => {
-        const isMyBuy = purchaseDB.some(m => m.seq === p.seq);
-        soldDBText += `• ${p.title} ➔ 최종실거래가: ${p.price_parsed > 0 ? p.price_parsed.toLocaleString() + '원' : '금액유실'} ${isMyBuy ? '(★내매입)' : ''}\n`;
-      });
-
-      let matchPurchases = purchaseDB.filter(p => p.catName === cat.name);
-      let purchaseDBText = "";
-      matchPurchases.forEach(p => {
-        purchaseDBText += `• 번호 ${p.seq} ➔ 매입가: ${p.price_parsed.toLocaleString()}원 (${p.title})\n`;
-      });
-
-      combinedTrendInput += `\n### 📋 [게시판 분류]: ${cat.name}\n`;
-      combinedTrendInput += `[중고장터 완판 장부]:\n${soldDBText}\n`;
-      combinedTrendInput += `[사장님 실매입 이력]:\n${purchaseDBText || "최근 매입 데이터 없음"}\n`;
-      combinedTrendInput += `-------------------------------------------\n`;
-
-      reportedItemsPool.push(...unreportedItems);
-    }
-  }
-
-  if (combinedTrendInput.length > 0) {
-    console.log(`🧠 [AI 마스터 추세 분석] 토큰 세이빙 파이프라인 가동 및 단일 호출 정산 진입...`);
-    const masterTrendPrompt = generateMasterTrendPrompt(userSettings, combinedTrendInput);
-
+    const livePrompt = generateLivePrompt(userSettings, chunkInput, 1, 1);
     try {
-      const response = await ai.models.generateContent({ 
-        model: 'gemini-3.1-flash-lite', 
-        contents: [{ role: 'user', parts: [{ text: masterTrendPrompt }] }], 
-        config: { temperature: 0.1 } 
-      });
-      
-      await sendTelegramMessage(response.text);
-      
-      reportedItemsPool.forEach(p => { p.is_reported = true; });
-      saveSoldDB(soldDB);
-      console.log(`🏁 [통합 추세 보고 완료] 토큰 세이빙 정산 처리 잠금 완료.`);
-    } catch (err) {
-      console.log(`🚨 [통합 추세 가동 에러] ${err.message}`);
-    }
+      const response = await ai.models.generateContent({ model: 'gemini-3.1-flash-lite', contents: [{ role: 'user', parts: [{ text: livePrompt }] }], config: { temperature: 0.2 } });
+      if (response.text && !response.text.includes('이번 주기는 패스합니다')) {
+        await sendTelegramMessage(response.text);
+      }
+    } catch (err) {}
   }
 
   fs.writeFileSync(TRACKING_FILE, JSON.stringify(updatedTrackingData, null, 2), 'utf8');
 }
 
-// 🎯 외부 크론 신호 호출 전용 메인 단발성 실행 시퀀스
+// 🎯 단 1회 실행 후 10초 타임아웃 규정 적용 스크립트
 (async () => {
-  console.log('📢 [Project B-Hunt v9.9-Pro-Max-Linked] 외부 크론 신호 수신 - 스캔 실행.');
+  console.log('⚡ [Project B-Hunt] 10초 초고속 1회 단발성 스캔 시작.');
   try {
-    await checkTelegramCommands(); // 텔레그램 원격 명령 체크 및 반영
-    await runBikesellScanner();    // 스캔 및 AI 분석 구동
-    console.log('✨ [스캔 완료] 프로세스를 종료합니다.');
+    await checkTelegramCommands();
+    await runBikesellScanner();
+    console.log('✨ [스캔 완수] 완료 후 프로세스를 정돈합니다.');
   } catch (err) {
-    console.error(`🚨 [실행 예외 발생] ${err.message}`);
+    console.error(`🚨 [실행 예외] ${err.message}`);
   }
 })();
