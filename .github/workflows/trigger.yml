@@ -24,8 +24,9 @@ jobs:
       - name: Run Main Scanner
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_TOKEN }} # 👈 TELEGRAM_TOKEN 으로 수정
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: node scripts/index.js
         run: node scripts/index.js # 👈 만약 파일명이 다르면 scripts/scan-backup.js 형태로 맞춰주세요.
 
       # 💡 스캔 완료 후 갱신된 DB 파일(bhunt_*.json)을 GitHub에 자동 커밋 및 푸시
