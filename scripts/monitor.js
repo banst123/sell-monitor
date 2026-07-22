@@ -32,7 +32,7 @@ const BOARDS = [
   { name: '미니벨로 부품장터', url: 'https://bikesell.co.kr/site/board/list.asp?doltop=MARKET&dolsection=MARKET34', mobileUrl: 'https://bikesell.co.kr/site/m/list.asp?doltop=MARKET&dolsection=MARKET34' }
 ];
 
-// 프로젝트 최상위 루트 경로 지정 (scripts/.. -> 루트)
+// 환경변수에 따른 기록 파일명 분리 (기본값: seen_posts.json)
 const seenFileName = process.env.SEEN_FILE_NAME || 'seen_posts.json';
 const SEEN_FILE = path.resolve(__dirname, '..', seenFileName);
 const CONFIG_FILE = path.resolve(__dirname, '..', 'filter_config.json');
@@ -50,7 +50,7 @@ function loadSeenIds() {
     console.log(`[SYSTEM] 기존 탐색 기록 ${arr.length}개 로드 완료 (${SEEN_FILE})`);
     return { set: new Set(arr), isFirstRun: false };
   } catch (e) {
-    console.error('[ERROR] seen_posts.json 읽기 오류:', e.message);
+    console.error('[ERROR] seen_posts 읽기 오류:', e.message);
     return { set: new Set(), isFirstRun: true };
   }
 }
@@ -62,9 +62,9 @@ function saveSeenIds(set) {
       arr = arr.slice(-1000);
     }
     fs.writeFileSync(SEEN_FILE, JSON.stringify(arr, null, 2), 'utf8');
-    console.log(`[SYSTEM] seen_posts.json 저장 완료 (총 ${arr.length}개 기록됨 -> ${SEEN_FILE})`);
+    console.log(`[SYSTEM] 기록 저장 완료 (총 ${arr.length}개 기록됨 -> ${SEEN_FILE})`);
   } catch (e) {
-    console.error('[ERROR] seen_posts.json 저장 오류:', e.message);
+    console.error('[ERROR] seen_posts 저장 오류:', e.message);
   }
 }
 
@@ -213,7 +213,7 @@ function parseList(html, board) {
 
 (async () => {
   console.log('====================================================');
-  console.log('[START] 바이크셀 8개 통합 장터 구동 엔진 (서버 스트림 최적화본)');
+  console.log('[START] 바이크셀 8개 통합 장터 구동 엔진');
   console.log('====================================================');
 
   const { set: newSeen, isFirstRun } = loadSeenIds();
@@ -247,12 +247,12 @@ function parseList(html, board) {
       return;
     }
 
-    // 변경사항 파일에 기록
+    // 변경사항 저장
     saveSeenIds(newSeen);
 
-    // 최초 구동 시에는 기존 목록 전체 알림을 방지하고 데이터 수집만 진행
+    // 최초 구동 시 대량 알림 방지를 위한 데이터 초기화 작업만 수행
     if (isFirstRun) {
-      console.log('\n[INFO] 최초 구동이므로 기존 게시글들을 seen_posts.json에 초기화 수집했습니다.');
+      console.log('\n[INFO] 최초 구동이므로 기존 게시글들을 저장 파일에 초기 수집했습니다.');
       console.log('[INFO] 다음 스캔부터 새로 등록되는 매물만 텔레그램으로 발송됩니다.');
       return;
     }
