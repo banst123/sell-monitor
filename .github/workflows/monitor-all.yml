@@ -1,13 +1,15 @@
 name: Sell Monitor All (No Filter)
 
 on:
-  # 외부 크론(1시간 주기) 또는 GitHub 웹에서 수동 실행
+  # 1시간 주기 자동 실행 (cron 필요 시 활성화)
+  # schedule:
+  #   - cron: '0 * * * *'
+  # 외부 트리거 또는 GitHub 웹에서 수동 실행
   workflow_dispatch:
 
-# 🎯 캐시 제어 API를 호출하기 위해 Actions write 권한을 명시적으로 부여합니다.
+# 🎯 Repository에 변경된 seen_posts.json을 커밋/푸시하기 위해 write 권한을 부여합니다.
 permissions:
-  actions: write
-  contents: read
+  contents: write
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
@@ -19,14 +21,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4.2.2
-
-      - name: Cache seen posts
-        uses: actions/cache@v4.2.0
         with:
-          path: seen_posts.json
-          key: all-seen-${{ github.run_id }}-${{ github.run_attempt }}
-          restore-keys: |
-            all-seen-
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Remove filter config for full monitoring
         run: rm -f filter_config.json
@@ -40,10 +36,16 @@ jobs:
         run: npm ci
 
       - name: Run monitor script
-        # 🎯 모든 환경변수를 env: 블록 내부에 올바른 들여쓰기(Indent)로 통합했습니다.
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GITHUB_REPOSITORY: ${{ github.repository }}
         run: node scripts/monitor.js
+
+      # 🔥 핵심: 탐색 내역(seen_posts.json)을 레포지토리에 커밋 & 푸시하여 영구 보존
+      - name: Commit & Push updated seen_posts.json
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git add seen_posts.json
+          git commit -m "chore: update seen_posts.json (All) [skip ci]" || exit 0
+          git push
