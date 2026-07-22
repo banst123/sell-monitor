@@ -4,9 +4,6 @@ import path from 'path';
 import https from 'https';
 import { fileURLToPath } from 'url';
 
-// ==========================================
-// ESM 환경 내 __dirname 및 경로 설정
-// ==========================================
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
@@ -16,7 +13,6 @@ const FILTER_FILE = path.resolve(__dirname, '..', 'filter_config.json');
 const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN;
 const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID;
 
-// 모니터링 대상 8개 장터 목록
 const BOARDS = [
   { name: '산악완성차 중고장터', url: 'http://www.bikesell.co.kr/m/m_board.asp?board=sub01' },
   { name: '산악프레임 중고장터', url: 'http://www.bikesell.co.kr/m/m_board.asp?board=sub02' },
@@ -28,34 +24,25 @@ const BOARDS = [
   { name: '미니벨로 부품장터', url: 'http://www.bikesell.co.kr/m/m_board.asp?board=sub09' }
 ];
 
-// ==========================================
-// Helper 함수
-// ==========================================
-
-// 1. 게시판별 최신 ID 기록 로드
 function loadLastSeenIds() {
   if (fs.existsSync(SEEN_FILE)) {
     try {
       const data = JSON.parse(fs.readFileSync(SEEN_FILE, 'utf8'));
       if (Array.isArray(data)) {
-        console.log('[SYSTEM] 기존 구 버전 배열 형태 데이터를 객체 포맷으로 전환합니다.');
         return {};
       }
       return data;
     } catch (e) {
-      console.error('[WARN] seen_posts.json 파싱 실패. 초기화합니다.');
       return {};
     }
   }
   return {};
 }
 
-// 2. 최신 ID 기록 저장
 function saveLastSeenIds(lastSeenIds) {
   fs.writeFileSync(SEEN_FILE, JSON.stringify(lastSeenIds, null, 2), 'utf8');
 }
 
-// 3. 필터 설정(키워드/작성자) 로드
 function loadFilterConfig() {
   if (fs.existsSync(FILTER_FILE)) {
     try {
@@ -69,16 +56,13 @@ function loadFilterConfig() {
     } catch (e) {
       console.error('[ERROR] filter_config.json 읽기 오류:', e.message);
     }
-  } else {
-    console.log('[WARN] filter_config.json 파일이 존재하지 않습니다.');
   }
   return { KEYWORDS: [], WRITERS: [] };
 }
 
-// 4. 텔레그램 메시지 전송
 function sendTelegramMessage(text) {
   if (!TELEGRAM_TOKEN || !TELEGRAM_CHAT_ID) {
-    console.log('[TELEGRAM SKIPPED] 토큰 또는 Chat ID가 설정되지 않았습니다.');
+    console.log('[TELEGRAM SKIPPED] 토큰 또는 Chat ID 미설정');
     console.log(text);
     return;
   }
@@ -99,17 +83,12 @@ function sendTelegramMessage(text) {
     }
   };
 
-  const req = https.request(options, (res) => {
-    res.on('data', () => {});
-  });
+  const req = https.request(options, () => {});
   req.on('error', (e) => console.error('[TELEGRAM ERROR]', e.message));
   req.write(payload);
   req.end();
 }
 
-// ==========================================
-// 메인 구동 엔진
-// ==========================================
 async function run() {
   console.log('====================================================');
   console.log('[START] 바이크셀 8개 통합 장터 구동 엔진 (게시글 ID 기준)');
@@ -133,42 +112,50 @@ async function run() {
     try {
       await page.goto(board.url, { waitUntil: 'domcontentloaded', timeout: 30000 });
 
-      // 파싱: 게시글 목록 수집
+      // ⚡ 바이크셀 모바일 페이지 전용 강력한 파싱 로직
       const posts = await page.evaluate(() => {
-        const rows = Array.from(document.querySelectorAll('table tr, ul li, .board_list tr'));
+        const anchors = Array.from(document.querySelectorAll('a[href*="code="]'));
         const results = [];
+        const seenCodes = new Set();
 
-        rows.forEach(row => {
-          const linkEl = row.querySelector('a[href*="code="], a[href*="board="]');
-          if (!linkEl) return;
-
-          const href = linkEl.getAttribute('href') || '';
+        anchors.forEach(a => {
+          const href = a.getAttribute('href') || '';
           const match = href.match(/code=(\d+)/);
           if (!match) return;
 
           const id = parseInt(match[1], 10);
-          const title = linkEl.innerText.trim();
-          
-          const writerEl = row.querySelector('.writer, .author, td:nth-child(3)');
-          const writer = writerEl ? writerEl.innerText.trim() : '';
+          if (seenCodes.has(id)) return;
+          seenCodes.add(id);
 
-          if (id && title) {
-            results.push({ id, title, writer, href });
+          // 제목 추출
+          const title = a.innerText.replace(/\s+/g, ' ').trim();
+          if (!title || title.length < 2) return;
+
+          // 작성자 추출 (부모/인접 요소 탐색)
+          const parent = a.closest('tr, li, div');
+          let writer = '';
+          if (parent) {
+            const writerNode = parent.querySelector('.writer, .author, font, td:nth-child(3)');
+            if (writerNode) {
+              writer = writerNode.innerText.trim();
+            }
           }
+
+          results.push({ id, title, writer, href });
         });
 
         return results;
       });
 
       if (posts.length === 0) {
-        console.log(`└ [수집 완료] ${board.name} -> 수집된 게시글 없음`);
+        console.log(`└ [수집 실패] ${board.name} -> DOM 파싱된 게시글 없음`);
         continue;
       }
 
       const maxFetchedId = Math.max(...posts.map(p => p.id));
-      console.log(`└ [파싱 완료] ${board.name} -> 최신글 ID: ${maxFetchedId} (이전 탐색 ID: ${lastId})`);
+      console.log(`└ [파싱 완료] ${board.name} -> 수집 ${posts.length}개 / 최신글 ID: ${maxFetchedId} (이전 탐색 ID: ${lastId})`);
 
-      // 기존 탐색 ID보다 큰 신규 글만 필터링
+      // 신규 게시글 감지
       const newPosts = posts.filter(p => p.id > lastId);
 
       if (newPosts.length > 0) {
@@ -179,7 +166,7 @@ async function run() {
             post.title.toLowerCase().includes(kw.toLowerCase())
           );
           const matchedWriter = filterConfig.WRITERS.find(wr => 
-            post.writer.toLowerCase().includes(wr.toLowerCase())
+            wr && post.writer.toLowerCase().includes(wr.toLowerCase())
           );
 
           if (matchedKeyword || matchedWriter) {
@@ -214,7 +201,6 @@ async function run() {
 
   await browser.close();
 
-  // 최신 ID 기록 저장을 위해 세이브
   saveLastSeenIds(lastSeenIds);
 
   if (totalMatchedPosts.length > 0) {
