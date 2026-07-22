@@ -18,7 +18,7 @@ jobs:
           node-version: '20'
 
       - name: Install Dependencies
-        run: npm ci
+        run: npm install # 👈 기존 npm ci 에서 npm install 로 변경
 
       - name: Run Main Scanner
         env:
