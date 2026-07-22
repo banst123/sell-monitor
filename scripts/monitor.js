@@ -1,11 +1,15 @@
-const { chromium } = require('playwright');
-const fs = require('fs');
-const path = require('path');
-const https = require('https');
+import { chromium } from 'playwright';
+import fs from 'fs';
+import path from 'path';
+import https from 'https';
+import { fileURLToPath } from 'url';
 
 // ==========================================
-// 파일 경로 및 환경 변수 설정
+// ESM 환경 내 __dirname 및 경로 설정
 // ==========================================
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
 const SEEN_FILE = path.resolve(__dirname, '..', 'seen_posts.json');
 const FILTER_FILE = path.resolve(__dirname, '..', 'filter_config.json');
 
@@ -28,12 +32,11 @@ const BOARDS = [
 // Helper 함수
 // ==========================================
 
-// 1. 게시판별 최신 ID 기록 로드 (없거나 깨졌을 경우 객체 구조로 초기화)
+// 1. 게시판별 최신 ID 기록 로드
 function loadLastSeenIds() {
   if (fs.existsSync(SEEN_FILE)) {
     try {
       const data = JSON.parse(fs.readFileSync(SEEN_FILE, 'utf8'));
-      // 배열 형태의 구 버전 파일일 경우 객체로 재설정
       if (Array.isArray(data)) {
         console.log('[SYSTEM] 기존 구 버전 배열 형태 데이터를 객체 포맷으로 전환합니다.');
         return {};
@@ -140,14 +143,12 @@ async function run() {
           if (!linkEl) return;
 
           const href = linkEl.getAttribute('href') || '';
-          // 게시글 고유 ID 추출 (code= 숫자 파싱)
           const match = href.match(/code=(\d+)/);
           if (!match) return;
 
           const id = parseInt(match[1], 10);
           const title = linkEl.innerText.trim();
           
-          // 작성자 파싱
           const writerEl = row.querySelector('.writer, .author, td:nth-child(3)');
           const writer = writerEl ? writerEl.innerText.trim() : '';
 
@@ -164,18 +165,16 @@ async function run() {
         continue;
       }
 
-      // 수집한 목록 중 가장 높은 번호 확인
       const maxFetchedId = Math.max(...posts.map(p => p.id));
       console.log(`└ [파싱 완료] ${board.name} -> 최신글 ID: ${maxFetchedId} (이전 탐색 ID: ${lastId})`);
 
-      // ⚡ 기존 번호(lastId)보다 높은 번호(신규 등록글)만 추출
+      // 기존 탐색 ID보다 큰 신규 글만 필터링
       const newPosts = posts.filter(p => p.id > lastId);
 
       if (newPosts.length > 0) {
         console.log(`  └ 🆕 신규 게시글 ${newPosts.length}건 감지! 필터 대조를 진행합니다.`);
 
         newPosts.forEach(post => {
-          // 키워드 및 작성자 조건 대조
           const matchedKeyword = filterConfig.KEYWORDS.find(kw => 
             post.title.toLowerCase().includes(kw.toLowerCase())
           );
@@ -200,11 +199,9 @@ async function run() {
           }
         });
 
-        // 최신 번호로 탐색 기록 즉시 업데이트
         lastSeenIds[board.name] = maxFetchedId;
       } else {
         console.log(`  └ [변동 없음] 신규 게시글이 없습니다.`);
-        // 최초 구동 시 기준점 잡기용
         if (!lastSeenIds[board.name]) {
           lastSeenIds[board.name] = maxFetchedId;
         }
@@ -217,10 +214,9 @@ async function run() {
 
   await browser.close();
 
-  // 탐색 완료 후 최신 ID 기록 파일 저장
+  // 최신 ID 기록 저장을 위해 세이브
   saveLastSeenIds(lastSeenIds);
 
-  // 필터 매칭된 신규 글이 있을 경우 텔레그램 발송
   if (totalMatchedPosts.length > 0) {
     console.log(`\n[알림 발송] 총 ${totalMatchedPosts.length}건의 매칭 매물을 전송합니다.`);
 
