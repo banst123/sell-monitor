@@ -1,14 +1,19 @@
 {
-  "name": "sell-monitor",
+  "name": "bikesell-scan",
   "version": "1.0.0",
-  "private": true,
-  "type": "module",
+  "description": "",
+  "main": "index.js",
   "scripts": {
-    "start": "node scripts/monitor.js"
+    "test": "echo \"Error: no test specified\" && exit 1"
   },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
   "dependencies": {
-    "cheerio": "^1.0.0-rc.12",
-    "dotenv": "^17.4.2",
-    "iconv-lite": "^0.7.2"
+    "@google/genai": "^2.8.0",
+    "axios": "^1.18.0",
+    "node-cron": "^4.2.1",
+    "playwright": "^1.60.0"
   }
 }
