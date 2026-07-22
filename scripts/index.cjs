@@ -32,15 +32,17 @@ const BIKESELL_CATEGORIES = [
   { top: 'MARKET', section: 'MARKET24', name: '전기 부속품' }
 ];
 
+// 🎯 타임아웃 30초 (30000ms) 설정
 const AXIOS_CONFIG = {
   headers: {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8',
+    'Accept-Language': 'ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7',
     'Origin': 'https://bikesell.co.kr',
     'Referer': 'https://bikesell.co.kr/site/board/list.asp'
   },
   responseType: 'arraybuffer',
-  timeout: 10000
+  timeout: 30000 // ⚡ 30초 타임아웃
 };
 
 function loadSoldDB() {
@@ -189,41 +191,87 @@ function generateLivePrompt(userSettings, textInput, chunkIndex, totalChunks) {
 ${textInput}`;
 }
 
-// 🎯 HAR 구조 재현 + cURL 출력 디버그 적용 로그인 수급 함수
+// 🎯 전체 패킷 상세 트레이싱 + 30초 1회 타임아웃 세션 수급 함수
 async function getBikesellSession() {
   console.log('\n==================================================');
-  console.log('🔑 [HAR & cURL 디버그 모드] 바이크셀 로그인 시퀀스 가동');
+  console.log('🔬 [전체 패킷 심층 분석 모드] 로그인 시퀀스 가동 (30초 제한)');
   console.log('==================================================');
 
+  // URL 대소문자 및 도메인 정밀 트레이싱
   const loginPageUrl = 'https://bikesell.co.kr/site/im/login.asp';
   const loginOkUrl = 'https://bikesell.co.kr/site/im/login_ok.asp';
 
+  let initialCookie = '';
+
+  // -------------------------------------------------------------------
+  // [1단계] GET 로그인 페이지 요청 패킷 분석
+  // -------------------------------------------------------------------
+  console.log(`\n📤 [GET 요청 패킷]`);
+  console.log(`• URL: ${loginPageUrl}`);
+  console.log(`• 요청 헤더: ${JSON.stringify(AXIOS_CONFIG.headers, null, 2)}`);
+
   try {
-    // 1단계: 사전 GET 요청 (ASPSESSIONID 쿠키 수급)
-    console.log(`🌐 [1단계 GET 요청] ${loginPageUrl}`);
-    const initRes = await axios.get(loginPageUrl, AXIOS_CONFIG);
-    
-    let initialCookie = '';
+    const initRes = await axios.get(loginPageUrl, {
+      ...AXIOS_CONFIG,
+      validateStatus: (status) => status >= 200 && status < 600 // 404/500 에러도 캡처
+    });
+
+    console.log(`\n📥 [GET 응답 패킷]`);
+    console.log(`• Status Code: ${initRes.status} ${initRes.statusText}`);
+    console.log(`• 응답 헤더: ${JSON.stringify(initRes.headers, null, 2)}`);
+
     if (initRes.headers['set-cookie']) {
       initialCookie = initRes.headers['set-cookie'].map(c => c.split(';')[0]).join('; ');
-      console.log(`🔹 [발급된 초기 세션 쿠키]: ${initialCookie}`);
+      console.log(`• 🍪 발급된 Cookie: ${initialCookie}`);
     } else {
-      console.log('⚠️ [경고] 초기 세션 쿠키(Set-Cookie)가 반환되지 않았습니다.');
+      console.log(`• 🍪 발급된 Cookie: 없음`);
     }
 
-    // 2단계: cURL 명령어 출력 (수동 검증용)
-    const payloadString = 'formname=login&dolid=banst123&dolpass=bst511790&idcheck=ON';
-    
-    console.log('\n📋 [재현용 cURL 명령어 - 터미널에 복사하여 직접 실행 가능]:');
-    console.log(`curl -v -X POST "${loginOkUrl}" \\`);
-    console.log(`  -H "User-Agent: ${AXIOS_CONFIG.headers['User-Agent']}" \\`);
-    console.log(`  -H "Content-Type: application/x-www-form-urlencoded" \\`);
-    console.log(`  -H "Referer: ${loginPageUrl}" \\`);
-    if (initialCookie) console.log(`  -H "Cookie: ${initialCookie}" \\`);
-    console.log(`  --data "${payloadString}"\n`);
+    const initBodySnippet = decodeEucKr(initRes.data).replace(/\s+/g, ' ').substring(0, 300);
+    console.log(`• 📄 응답 본문 미리보기: "${initBodySnippet}"`);
 
-    // 3단계: POST 로그인 요청
-    console.log(`🚀 [2단계 POST 제출] ${loginOkUrl}`);
+    if (initRes.status === 404) {
+      console.log(`🚨 [404 원인 분석] GET 요청 URL 경로가 올바르지 않거나, 서버에서 직접 차단했습니다.`);
+      return '';
+    }
+
+  } catch (err) {
+    console.log(`🚨 [1단계 GET 네트워크 예외]: ${err.message}`);
+    if (err.response) {
+      console.log(`• Exception Status: ${err.response.status}`);
+      console.log(`• Exception Headers: ${JSON.stringify(err.response.headers, null, 2)}`);
+    }
+    return '';
+  }
+
+  // -------------------------------------------------------------------
+  // [2단계] cURL 명령어 출력 (터미널 수동 교차 검증용)
+  // -------------------------------------------------------------------
+  const payloadString = 'formname=login&dolid=banst123&dolpass=bst511790&idcheck=ON';
+  console.log('\n📋 [재현용 cURL 명령어]');
+  console.log(`curl -v -X POST "${loginOkUrl}" \\`);
+  console.log(`  -H "User-Agent: ${AXIOS_CONFIG.headers['User-Agent']}" \\`);
+  console.log(`  -H "Content-Type: application/x-www-form-urlencoded" \\`);
+  console.log(`  -H "Referer: ${loginPageUrl}" \\`);
+  if (initialCookie) console.log(`  -H "Cookie: ${initialCookie}" \\`);
+  console.log(`  --data "${payloadString}"\n`);
+
+  // -------------------------------------------------------------------
+  // [3단계] POST 로그인 요청 패킷 분석
+  // -------------------------------------------------------------------
+  const postHeaders = {
+    ...AXIOS_CONFIG.headers,
+    'Content-Type': 'application/x-www-form-urlencoded',
+    'Cookie': initialCookie,
+    'Referer': loginPageUrl
+  };
+
+  console.log(`📤 [POST 요청 패킷]`);
+  console.log(`• URL: ${loginOkUrl}`);
+  console.log(`• 요청 헤더: ${JSON.stringify(postHeaders, null, 2)}`);
+  console.log(`• Payload Body: ${payloadString}`);
+
+  try {
     const params = new URLSearchParams();
     params.append('formname', 'login');
     params.append('dolid', 'banst123');
@@ -232,31 +280,26 @@ async function getBikesellSession() {
 
     const loginRes = await axios.post(loginOkUrl, params.toString(), {
       ...AXIOS_CONFIG,
-      headers: {
-        ...AXIOS_CONFIG.headers,
-        'Content-Type': 'application/x-www-form-urlencoded',
-        'Cookie': initialCookie,
-        'Referer': loginPageUrl
-      },
+      headers: postHeaders,
       maxRedirects: 0,
-      validateStatus: (status) => status >= 200 && status < 500
+      validateStatus: (status) => status >= 200 && status < 600
     });
 
-    // 4단계: 응답 분석 및 상세 로그 출력
+    console.log(`\n📥 [POST 응답 패킷]`);
+    console.log(`• Status Code: ${loginRes.status} ${loginRes.statusText}`);
+    console.log(`• 응답 헤더: ${JSON.stringify(loginRes.headers, null, 2)}`);
+
     const responseBody = decodeEucKr(loginRes.data);
     const setCookieHeaders = loginRes.headers['set-cookie'];
 
-    console.log(`📊 [응답 상태 코드]: ${loginRes.status}`);
-    console.log(`📩 [응답 Set-Cookie]: ${setCookieHeaders ? JSON.stringify(setCookieHeaders) : '없음'}`);
-
     if (responseBody.includes('비밀번호가 틀립니다')) {
-      console.log('❌ [서버 응답 결과]: "비밀번호가 틀립니다" 경고창 감지 (인증 실패)');
+      console.log('❌ [인증 진단]: "비밀번호가 틀립니다" 경고창 확인');
     } else if (responseBody.includes('존재하지 않는')) {
-      console.log('❌ [서버 응답 결과]: "존재하지 않는 아이디" 경고창 감지 (인증 실패)');
+      console.log('❌ [인증 진단]: "존재하지 않는 아이디" 경고창 확인');
     } else if (responseBody.includes('location.href') || responseBody.includes('main.asp')) {
-      console.log('✅ [서버 응답 결과]: 리다이렉션 구문 감지 (로그인 성공 추정)');
+      console.log('✅ [인증 진단]: 리다이렉션 구문 확인 (로그인 성립)');
     } else {
-      const cleanBodySnippet = responseBody.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().substring(0, 150);
+      const cleanBodySnippet = responseBody.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().substring(0, 200);
       console.log(`📄 [응답 본문 텍스트 요약]: "${cleanBodySnippet}"`);
     }
 
@@ -266,12 +309,15 @@ async function getBikesellSession() {
       finalCookie = initialCookie ? `${initialCookie}; ${authCookie}` : authCookie;
     }
 
-    if (finalCookie) {
-      console.log(`✅ [최종 확보된 인증 쿠키]: ${finalCookie}\n`);
-      return finalCookie;
-    }
+    console.log(`\n✅ [최종 획득 세션 쿠키]: ${finalCookie || '없음'}\n`);
+    return finalCookie;
+
   } catch (err) {
-    console.log(`🚨 [로그인 시퀀스 예외 발생]: ${err.message}`);
+    console.log(`🚨 [2단계 POST 네트워크 예외]: ${err.message}`);
+    if (err.response) {
+      console.log(`• Exception Status: ${err.response.status}`);
+      console.log(`• Exception Headers: ${JSON.stringify(err.response.headers, null, 2)}`);
+    }
   }
 
   return '';
@@ -307,7 +353,7 @@ async function runBikesellScanner() {
         
         const tdMatches = tr.match(/<td[^>]*>([\s\S]*?)<\/td>/gi) || [];
         let dateStr = "";
-        for (const td of tdMatches) {
+        for (const td mysterious td of tdMatches) {
           const text = td.replace(/<[^>]*>/g, '').trim();
           if (/[\d]{1,2}(:|-|\.)[\d]{1,2}/.test(text)) dateStr = text;
         }
