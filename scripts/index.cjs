@@ -32,7 +32,6 @@ const BIKESELL_CATEGORIES = [
   { top: 'MARKET', section: 'MARKET24', name: '전기 부속품' }
 ];
 
-// 🎯 요청하신 대로 타임아웃을 10초(10000ms)로 대폭 단축
 const AXIOS_CONFIG = {
   headers: {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
@@ -41,7 +40,7 @@ const AXIOS_CONFIG = {
     'Referer': 'https://bikesell.co.kr/site/board/list.asp'
   },
   responseType: 'arraybuffer',
-  timeout: 10000 // ⚡ 10초 제한
+  timeout: 10000
 };
 
 function loadSoldDB() {
@@ -190,32 +189,91 @@ function generateLivePrompt(userSettings, textInput, chunkIndex, totalChunks) {
 ${textInput}`;
 }
 
+// 🎯 HAR 구조 재현 + cURL 출력 디버그 적용 로그인 수급 함수
 async function getBikesellSession() {
-  console.log('🔑 [axios] 로그인 세션 요청 (10초 제한)...');
+  console.log('\n==================================================');
+  console.log('🔑 [HAR & cURL 디버그 모드] 바이크셀 로그인 시퀀스 가동');
+  console.log('==================================================');
+
+  const loginPageUrl = 'https://bikesell.co.kr/site/im/login.asp';
   const loginOkUrl = 'https://bikesell.co.kr/site/im/login_ok.asp';
-  const params = new URLSearchParams();
-  params.append('formname', 'login');
-  params.append('dolid', 'banst123');
-  params.append('dolpass', 'bst511790');
-  params.append('idcheck', 'ON');
 
   try {
+    // 1단계: 사전 GET 요청 (ASPSESSIONID 쿠키 수급)
+    console.log(`🌐 [1단계 GET 요청] ${loginPageUrl}`);
+    const initRes = await axios.get(loginPageUrl, AXIOS_CONFIG);
+    
+    let initialCookie = '';
+    if (initRes.headers['set-cookie']) {
+      initialCookie = initRes.headers['set-cookie'].map(c => c.split(';')[0]).join('; ');
+      console.log(`🔹 [발급된 초기 세션 쿠키]: ${initialCookie}`);
+    } else {
+      console.log('⚠️ [경고] 초기 세션 쿠키(Set-Cookie)가 반환되지 않았습니다.');
+    }
+
+    // 2단계: cURL 명령어 출력 (수동 검증용)
+    const payloadString = 'formname=login&dolid=banst123&dolpass=bst511790&idcheck=ON';
+    
+    console.log('\n📋 [재현용 cURL 명령어 - 터미널에 복사하여 직접 실행 가능]:');
+    console.log(`curl -v -X POST "${loginOkUrl}" \\`);
+    console.log(`  -H "User-Agent: ${AXIOS_CONFIG.headers['User-Agent']}" \\`);
+    console.log(`  -H "Content-Type: application/x-www-form-urlencoded" \\`);
+    console.log(`  -H "Referer: ${loginPageUrl}" \\`);
+    if (initialCookie) console.log(`  -H "Cookie: ${initialCookie}" \\`);
+    console.log(`  --data "${payloadString}"\n`);
+
+    // 3단계: POST 로그인 요청
+    console.log(`🚀 [2단계 POST 제출] ${loginOkUrl}`);
+    const params = new URLSearchParams();
+    params.append('formname', 'login');
+    params.append('dolid', 'banst123');
+    params.append('dolpass', 'bst511790');
+    params.append('idcheck', 'ON');
+
     const loginRes = await axios.post(loginOkUrl, params.toString(), {
       ...AXIOS_CONFIG,
       headers: {
         ...AXIOS_CONFIG.headers,
-        'Content-Type': 'application/x-www-form-urlencoded'
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'Cookie': initialCookie,
+        'Referer': loginPageUrl
       },
       maxRedirects: 0,
-      validateStatus: (status) => status >= 200 && status < 400 
+      validateStatus: (status) => status >= 200 && status < 500
     });
 
-    if (loginRes.headers['set-cookie']) {
-      return loginRes.headers['set-cookie'].map(c => c.split(';')[0]).join('; ');
+    // 4단계: 응답 분석 및 상세 로그 출력
+    const responseBody = decodeEucKr(loginRes.data);
+    const setCookieHeaders = loginRes.headers['set-cookie'];
+
+    console.log(`📊 [응답 상태 코드]: ${loginRes.status}`);
+    console.log(`📩 [응답 Set-Cookie]: ${setCookieHeaders ? JSON.stringify(setCookieHeaders) : '없음'}`);
+
+    if (responseBody.includes('비밀번호가 틀립니다')) {
+      console.log('❌ [서버 응답 결과]: "비밀번호가 틀립니다" 경고창 감지 (인증 실패)');
+    } else if (responseBody.includes('존재하지 않는')) {
+      console.log('❌ [서버 응답 결과]: "존재하지 않는 아이디" 경고창 감지 (인증 실패)');
+    } else if (responseBody.includes('location.href') || responseBody.includes('main.asp')) {
+      console.log('✅ [서버 응답 결과]: 리다이렉션 구문 감지 (로그인 성공 추정)');
+    } else {
+      const cleanBodySnippet = responseBody.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().substring(0, 150);
+      console.log(`📄 [응답 본문 텍스트 요약]: "${cleanBodySnippet}"`);
+    }
+
+    let finalCookie = initialCookie;
+    if (setCookieHeaders && setCookieHeaders.length > 0) {
+      const authCookie = setCookieHeaders.map(c => c.split(';')[0]).join('; ');
+      finalCookie = initialCookie ? `${initialCookie}; ${authCookie}` : authCookie;
+    }
+
+    if (finalCookie) {
+      console.log(`✅ [최종 확보된 인증 쿠키]: ${finalCookie}\n`);
+      return finalCookie;
     }
   } catch (err) {
-    console.log(`⚠️ [로그인 타임아웃/실패] ${err.message} ➔ 비회원 모드 직행`);
+    console.log(`🚨 [로그인 시퀀스 예외 발생]: ${err.message}`);
   }
+
   return '';
 }
 
@@ -227,7 +285,6 @@ async function runBikesellScanner() {
   }
   const updatedTrackingData = { ...trackingData };
 
-  // 1. 단발성 10초 로그인 시도
   let sessionCookie = await getBikesellSession();
   const requestConfig = { ...AXIOS_CONFIG, headers: { ...AXIOS_CONFIG.headers, 'Cookie': sessionCookie } };
   let allFlattenPosts = []; 
@@ -310,7 +367,7 @@ async function runBikesellScanner() {
     const livePrompt = generateLivePrompt(userSettings, chunkInput, 1, 1);
     try {
       const response = await ai.models.generateContent({ model: 'gemini-3.1-flash-lite', contents: [{ role: 'user', parts: [{ text: livePrompt }] }], config: { temperature: 0.2 } });
-      if (response.text && !response.text.includes('이번 주기는 패스합니다')) {
+      if (response.text && !response.text.includes('이번 주기가 패스합니다')) {
         await sendTelegramMessage(response.text);
       }
     } catch (err) {}
@@ -319,13 +376,13 @@ async function runBikesellScanner() {
   fs.writeFileSync(TRACKING_FILE, JSON.stringify(updatedTrackingData, null, 2), 'utf8');
 }
 
-// 🎯 단 1회 실행 후 10초 타임아웃 규정 적용 스크립트
+// 🎯 단발성 스캔 실행 엔트리
 (async () => {
-  console.log('⚡ [Project B-Hunt] 10초 초고속 1회 단발성 스캔 시작.');
+  console.log('📢 [Project B-Hunt] 스캔 프로세스 가동');
   try {
     await checkTelegramCommands();
     await runBikesellScanner();
-    console.log('✨ [스캔 완수] 완료 후 프로세스를 정돈합니다.');
+    console.log('✨ [스캔 완료] 프로세스를 종료합니다.');
   } catch (err) {
     console.error(`🚨 [실행 예외] ${err.message}`);
   }
