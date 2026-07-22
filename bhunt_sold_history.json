@@ -1,0 +1,82 @@
+[
+  {
+    "seq": 96960,
+    "catName": "산악 프레임",
+    "title": "글 번호 96960",
+    "price_parsed": 70000,
+    "price_status": "정상 파싱 성공",
+    "url": "https://bikesell.co.kr/site/board/content.asp?Search=&SearchText=&Page=1&Gotopage=1&doltop=MARKET&dolsection=MARKET2&dolseq=96960&dolcha=&POINT=",
+    "is_reported": false,
+    "captured_at": "2026-07-22"
+  },
+  {
+    "seq": 96959,
+    "catName": "산악 프레임",
+    "title": "글 번호 96959",
+    "price_parsed": 140000,
+    "price_status": "정상 파싱 성공",
+    "url": "https://bikesell.co.kr/site/board/content.asp?Search=&SearchText=&Page=1&Gotopage=1&doltop=MARKET&dolsection=MARKET2&dolseq=96959&dolcha=&POINT=",
+    "is_reported": false,
+    "captured_at": "2026-07-22"
+  },
+  {
+    "seq": 96958,
+    "catName": "산악 프레임",
+    "title": "글 번호 96958",
+    "price_parsed": 150000,
+    "price_status": "정상 파싱 성공",
+    "url": "https://bikesell.co.kr/site/board/content.asp?Search=&SearchText=&Page=1&Gotopage=1&doltop=MARKET&dolsection=MARKET2&dolseq=96958&dolcha=&POINT=",
+    "is_reported": false,
+    "captured_at": "2026-07-22"
+  },
+  {
+    "seq": 102338,
+    "catName": "샥, 포크",
+    "title": "글 번호 102338",
+    "price_parsed": 0,
+    "price_status": "금액 유실됨(수요 데이터)",
+    "url": "https://bikesell.co.kr/site/board/content.asp?Search=&SearchText=&Page=1&Gotopage=1&doltop=MARKET&dolsection=MARKET3&dolseq=102338&dolcha=&POINT=",
+    "is_reported": false,
+    "captured_at": "2026-07-22"
+  },
+  {
+    "seq": 102337,
+    "catName": "샥, 포크",
+    "title": "글 번호 102337",
+    "price_parsed": 160000,
+    "price_status": "정상 파싱 성공",
+    "url": "https://bikesell.co.kr/site/board/content.asp?Search=&SearchText=&Page=1&Gotopage=1&doltop=MARKET&dolsection=MARKET3&dolseq=102337&dolcha=&POINT=",
+    "is_reported": false,
+    "captured_at": "2026-07-22"
+  },
+  {
+    "seq": 102333,
+    "catName": "샥, 포크",
+    "title": "글 번호 102333",
+    "price_parsed": 120000,
+    "price_status": "정상 파싱 성공",
+    "url": "https://bikesell.co.kr/site/board/content.asp?Search=&SearchText=&Page=1&Gotopage=1&doltop=MARKET&dolsection=MARKET3&dolseq=102333&dolcha=&POINT=",
+    "is_reported": false,
+    "captured_at": "2026-07-22"
+  },
+  {
+    "seq": 59970,
+    "catName": "로드 부속",
+    "title": "글 번호 59970",
+    "price_parsed": 40000,
+    "price_status": "정상 파싱 성공",
+    "url": "https://bikesell.co.kr/site/board/content.asp?Search=&SearchText=&Page=1&Gotopage=1&doltop=ROAD&dolsection=ROAD4&dolseq=59970&dolcha=&POINT=",
+    "is_reported": false,
+    "captured_at": "2026-07-22"
+  },
+  {
+    "seq": 86690,
+    "catName": "로드 용품",
+    "title": "글 번호 86690",
+    "price_parsed": 40000,
+    "price_status": "정상 파싱 성공",
+    "url": "https://bikesell.co.kr/site/board/content.asp?Search=&SearchText=&Page=1&Gotopage=1&doltop=ROAD&dolsection=ROAD5&dolseq=86690&dolcha=&POINT=",
+    "is_reported": false,
+    "captured_at": "2026-07-22"
+  }
+]

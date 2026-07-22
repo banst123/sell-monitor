@@ -1,0 +1,662 @@
+[
+  {
+    "seq": 536880,
+    "catName": "산악 완성차",
+    "price_at_live": 850000,
+    "updated_at": 1784733310828
+  },
+  {
+    "seq": 536879,
+    "catName": "산악 완성차",
+    "price_at_live": 600000,
+    "updated_at": 1784733311718
+  },
+  {
+    "seq": 536878,
+    "catName": "산악 완성차",
+    "price_at_live": 2200000,
+    "updated_at": 1784733315796
+  },
+  {
+    "seq": 536877,
+    "catName": "산악 완성차",
+    "price_at_live": 850000,
+    "updated_at": 1784733317271
+  },
+  {
+    "seq": 536875,
+    "catName": "산악 완성차",
+    "price_at_live": 850000,
+    "updated_at": 1784733323193
+  },
+  {
+    "seq": 536874,
+    "catName": "산악 완성차",
+    "price_at_live": 2100000,
+    "updated_at": 1784733324456
+  },
+  {
+    "seq": 536873,
+    "catName": "산악 완성차",
+    "price_at_live": 9500000,
+    "updated_at": 1784733325757
+  },
+  {
+    "seq": 536837,
+    "catName": "산악 완성차",
+    "price_at_live": 4000000,
+    "updated_at": 1784733326688
+  },
+  {
+    "seq": 536828,
+    "catName": "산악 완성차",
+    "price_at_live": 850000,
+    "updated_at": 1784733327736
+  },
+  {
+    "seq": 536786,
+    "catName": "산악 완성차",
+    "price_at_live": 50000,
+    "updated_at": 1784733328626
+  },
+  {
+    "seq": 536545,
+    "catName": "산악 완성차",
+    "price_at_live": 1300000,
+    "updated_at": 1784733329625
+  },
+  {
+    "seq": 536518,
+    "catName": "산악 완성차",
+    "price_at_live": 550000,
+    "updated_at": 1784733330516
+  },
+  {
+    "seq": 536448,
+    "catName": "산악 완성차",
+    "price_at_live": 1000000,
+    "updated_at": 1784733331594
+  },
+  {
+    "seq": 535949,
+    "catName": "산악 완성차",
+    "price_at_live": 300000,
+    "updated_at": 1784733332500
+  },
+  {
+    "seq": 96967,
+    "catName": "산악 프레임",
+    "price_at_live": 50000,
+    "updated_at": 1784733333361
+  },
+  {
+    "seq": 96966,
+    "catName": "산악 프레임",
+    "price_at_live": 3300000,
+    "updated_at": 1784733334391
+  },
+  {
+    "seq": 96965,
+    "catName": "산악 프레임",
+    "price_at_live": 300000,
+    "updated_at": 1784733336172
+  },
+  {
+    "seq": 96964,
+    "catName": "산악 프레임",
+    "price_at_live": 50000,
+    "updated_at": 1784733337503
+  },
+  {
+    "seq": 96963,
+    "catName": "산악 프레임",
+    "price_at_live": 100000,
+    "updated_at": 1784733338702
+  },
+  {
+    "seq": 96962,
+    "catName": "산악 프레임",
+    "price_at_live": 1400000,
+    "updated_at": 1784733339781
+  },
+  {
+    "seq": 96961,
+    "catName": "산악 프레임",
+    "price_at_live": 200000,
+    "updated_at": 1784733340688
+  },
+  {
+    "seq": 96957,
+    "catName": "산악 프레임",
+    "price_at_live": 3500000,
+    "updated_at": 1784733347371
+  },
+  {
+    "seq": 96956,
+    "catName": "산악 프레임",
+    "price_at_live": 50000,
+    "updated_at": 1784733348296
+  },
+  {
+    "seq": 96944,
+    "catName": "산악 프레임",
+    "price_at_live": 4000000,
+    "updated_at": 1784733349199
+  },
+  {
+    "seq": 96931,
+    "catName": "산악 프레임",
+    "price_at_live": 50000,
+    "updated_at": 1784733350449
+  },
+  {
+    "seq": 102340,
+    "catName": "샥, 포크",
+    "price_at_live": 350000,
+    "updated_at": 1784733351453
+  },
+  {
+    "seq": 102339,
+    "catName": "샥, 포크",
+    "price_at_live": 250000,
+    "updated_at": 1784733352360
+  },
+  {
+    "seq": 102335,
+    "catName": "샥, 포크",
+    "price_at_live": 300000,
+    "updated_at": 1784733357672
+  },
+  {
+    "seq": 102334,
+    "catName": "샥, 포크",
+    "price_at_live": 900000,
+    "updated_at": 1784733358628
+  },
+  {
+    "seq": 102330,
+    "catName": "샥, 포크",
+    "price_at_live": 30000,
+    "updated_at": 1784733362085
+  },
+  {
+    "seq": 102305,
+    "catName": "샥, 포크",
+    "price_at_live": 550000,
+    "updated_at": 1784733363924
+  },
+  {
+    "seq": 102276,
+    "catName": "샥, 포크",
+    "price_at_live": 450000,
+    "updated_at": 1784733366062
+  },
+  {
+    "seq": 102205,
+    "catName": "샥, 포크",
+    "price_at_live": 200000,
+    "updated_at": 1784733366970
+  },
+  {
+    "seq": 699401,
+    "catName": "산악 자전거 부속",
+    "price_at_live": 150000,
+    "updated_at": 1784733367947
+  },
+  {
+    "seq": 699400,
+    "catName": "산악 자전거 부속",
+    "price_at_live": 150000,
+    "updated_at": 1784733369213
+  },
+  {
+    "seq": 699399,
+    "catName": "산악 자전거 부속",
+    "price_at_live": 100000,
+    "updated_at": 1784733370212
+  },
+  {
+    "seq": 699396,
+    "catName": "산악 자전거 부속",
+    "price_at_live": 20000,
+    "updated_at": 1784733374317
+  },
+  {
+    "seq": 699395,
+    "catName": "산악 자전거 부속",
+    "price_at_live": 20000,
+    "updated_at": 1784733377386
+  },
+  {
+    "seq": 699328,
+    "catName": "산악 자전거 부속",
+    "price_at_live": 3000,
+    "updated_at": 1784733379524
+  },
+  {
+    "seq": 699326,
+    "catName": "산악 자전거 부속",
+    "price_at_live": 40000,
+    "updated_at": 1784733380587
+  },
+  {
+    "seq": 699297,
+    "catName": "산악 자전거 부속",
+    "price_at_live": 130000,
+    "updated_at": 1784733381807
+  },
+  {
+    "seq": 699228,
+    "catName": "산악 자전거 부속",
+    "price_at_live": 800000,
+    "updated_at": 1784733383776
+  },
+  {
+    "seq": 103893,
+    "catName": "로드 완성차",
+    "price_at_live": 2490000,
+    "updated_at": 1784733391722
+  },
+  {
+    "seq": 103891,
+    "catName": "로드 완성차",
+    "price_at_live": 2200000,
+    "updated_at": 1784733392890
+  },
+  {
+    "seq": 103889,
+    "catName": "로드 완성차",
+    "price_at_live": 480000,
+    "updated_at": 1784733394037
+  },
+  {
+    "seq": 103888,
+    "catName": "로드 완성차",
+    "price_at_live": 3950000,
+    "updated_at": 1784733394604
+  },
+  {
+    "seq": 103887,
+    "catName": "로드 완성차",
+    "price_at_live": 2500000,
+    "updated_at": 1784733395156
+  },
+  {
+    "seq": 103886,
+    "catName": "로드 완성차",
+    "price_at_live": 3700000,
+    "updated_at": 1784733395726
+  },
+  {
+    "seq": 103863,
+    "catName": "로드 완성차",
+    "price_at_live": 6000000,
+    "updated_at": 1784733398010
+  },
+  {
+    "seq": 103858,
+    "catName": "로드 완성차",
+    "price_at_live": 1100000,
+    "updated_at": 1784733398577
+  },
+  {
+    "seq": 103853,
+    "catName": "로드 완성차",
+    "price_at_live": 2200000,
+    "updated_at": 1784733399162
+  },
+  {
+    "seq": 103851,
+    "catName": "로드 완성차",
+    "price_at_live": 4400000,
+    "updated_at": 1784733399739
+  },
+  {
+    "seq": 9125,
+    "catName": "로드 프레임",
+    "price_at_live": 750000,
+    "updated_at": 1784733400313
+  },
+  {
+    "seq": 9124,
+    "catName": "로드 프레임",
+    "price_at_live": 450000,
+    "updated_at": 1784733400892
+  },
+  {
+    "seq": 24011,
+    "catName": "로드 휠셋",
+    "price_at_live": 420000,
+    "updated_at": 1784733401467
+  },
+  {
+    "seq": 24010,
+    "catName": "로드 휠셋",
+    "price_at_live": 450000,
+    "updated_at": 1784733402038
+  },
+  {
+    "seq": 23995,
+    "catName": "로드 휠셋",
+    "price_at_live": 130000,
+    "updated_at": 1784733402576
+  },
+  {
+    "seq": 23948,
+    "catName": "로드 휠셋",
+    "price_at_live": 30000,
+    "updated_at": 1784733403127
+  },
+  {
+    "seq": 59982,
+    "catName": "로드 부속",
+    "price_at_live": 40000,
+    "updated_at": 1784733403702
+  },
+  {
+    "seq": 59981,
+    "catName": "로드 부속",
+    "price_at_live": 40000,
+    "updated_at": 1784733404262
+  },
+  {
+    "seq": 59980,
+    "catName": "로드 부속",
+    "price_at_live": 40000,
+    "updated_at": 1784733404865
+  },
+  {
+    "seq": 59979,
+    "catName": "로드 부속",
+    "price_at_live": 40000,
+    "updated_at": 1784733405843
+  },
+  {
+    "seq": 59978,
+    "catName": "로드 부속",
+    "price_at_live": 100000,
+    "updated_at": 1784733406412
+  },
+  {
+    "seq": 59977,
+    "catName": "로드 부속",
+    "price_at_live": 180000,
+    "updated_at": 1784733406981
+  },
+  {
+    "seq": 59976,
+    "catName": "로드 부속",
+    "price_at_live": 40000,
+    "updated_at": 1784733407854
+  },
+  {
+    "seq": 59975,
+    "catName": "로드 부속",
+    "price_at_live": 300000,
+    "updated_at": 1784733408421
+  },
+  {
+    "seq": 59974,
+    "catName": "로드 부속",
+    "price_at_live": 160000,
+    "updated_at": 1784733408994
+  },
+  {
+    "seq": 59973,
+    "catName": "로드 부속",
+    "price_at_live": 50000,
+    "updated_at": 1784733410492
+  },
+  {
+    "seq": 59972,
+    "catName": "로드 부속",
+    "price_at_live": 40000,
+    "updated_at": 1784733411068
+  },
+  {
+    "seq": 59971,
+    "catName": "로드 부속",
+    "price_at_live": 40000,
+    "updated_at": 1784733411607
+  },
+  {
+    "seq": 59962,
+    "catName": "로드 부속",
+    "price_at_live": 70000,
+    "updated_at": 1784733412801
+  },
+  {
+    "seq": 59804,
+    "catName": "로드 부속",
+    "price_at_live": 40000,
+    "updated_at": 1784733413340
+  },
+  {
+    "seq": 86699,
+    "catName": "로드 용품",
+    "price_at_live": 200000,
+    "updated_at": 1784733413955
+  },
+  {
+    "seq": 86698,
+    "catName": "로드 용품",
+    "price_at_live": 70000,
+    "updated_at": 1784733414527
+  },
+  {
+    "seq": 86697,
+    "catName": "로드 용품",
+    "price_at_live": 70000,
+    "updated_at": 1784733415101
+  },
+  {
+    "seq": 86696,
+    "catName": "로드 용품",
+    "price_at_live": 70000,
+    "updated_at": 1784733415682
+  },
+  {
+    "seq": 86695,
+    "catName": "로드 용품",
+    "price_at_live": 70000,
+    "updated_at": 1784733416277
+  },
+  {
+    "seq": 86694,
+    "catName": "로드 용품",
+    "price_at_live": 70000,
+    "updated_at": 1784733416844
+  },
+  {
+    "seq": 86693,
+    "catName": "로드 용품",
+    "price_at_live": 70000,
+    "updated_at": 1784733417413
+  },
+  {
+    "seq": 86692,
+    "catName": "로드 용품",
+    "price_at_live": 70000,
+    "updated_at": 1784733417986
+  },
+  {
+    "seq": 86691,
+    "catName": "로드 용품",
+    "price_at_live": 70000,
+    "updated_at": 1784733418602
+  },
+  {
+    "seq": 86685,
+    "catName": "로드 용품",
+    "price_at_live": 70000,
+    "updated_at": 1784733419713
+  },
+  {
+    "seq": 86670,
+    "catName": "로드 용품",
+    "price_at_live": 40000,
+    "updated_at": 1784733421338
+  },
+  {
+    "seq": 86663,
+    "catName": "로드 용품",
+    "price_at_live": 70000,
+    "updated_at": 1784733422143
+  },
+  {
+    "seq": 86662,
+    "catName": "로드 용품",
+    "price_at_live": 30000,
+    "updated_at": 1784733422700
+  },
+  {
+    "seq": 86651,
+    "catName": "로드 용품",
+    "price_at_live": 40000,
+    "updated_at": 1784733423287
+  },
+  {
+    "seq": 18907,
+    "catName": "미니벨로 완성차",
+    "price_at_live": 800000,
+    "updated_at": 1784733424251
+  },
+  {
+    "seq": 18906,
+    "catName": "미니벨로 완성차",
+    "price_at_live": 600000,
+    "updated_at": 1784733430236
+  },
+  {
+    "seq": 21155,
+    "catName": "전기 완성차",
+    "price_at_live": 550000,
+    "updated_at": 1784733431159
+  },
+  {
+    "seq": 21154,
+    "catName": "전기 완성차",
+    "price_at_live": 3100000,
+    "updated_at": 1784733432066
+  },
+  {
+    "seq": 21153,
+    "catName": "전기 완성차",
+    "price_at_live": 4700000,
+    "updated_at": 1784733433048
+  },
+  {
+    "seq": 21152,
+    "catName": "전기 완성차",
+    "price_at_live": 5900000,
+    "updated_at": 1784733433953
+  },
+  {
+    "seq": 21151,
+    "catName": "전기 완성차",
+    "price_at_live": 7000000,
+    "updated_at": 1784733434893
+  },
+  {
+    "seq": 21150,
+    "catName": "전기 완성차",
+    "price_at_live": 15500000,
+    "updated_at": 1784733435799
+  },
+  {
+    "seq": 21149,
+    "catName": "전기 완성차",
+    "price_at_live": 17000000,
+    "updated_at": 1784733436688
+  },
+  {
+    "seq": 21148,
+    "catName": "전기 완성차",
+    "price_at_live": 3100000,
+    "updated_at": 1784733437611
+  },
+  {
+    "seq": 21134,
+    "catName": "전기 완성차",
+    "price_at_live": 5500000,
+    "updated_at": 1784733438548
+  },
+  {
+    "seq": 21105,
+    "catName": "전기 완성차",
+    "price_at_live": 19900000,
+    "updated_at": 1784733439471
+  },
+  {
+    "seq": 21098,
+    "catName": "전기 완성차",
+    "price_at_live": 5500000,
+    "updated_at": 1784733440580
+  },
+  {
+    "seq": 21094,
+    "catName": "전기 완성차",
+    "price_at_live": 3100000,
+    "updated_at": 1784733441486
+  },
+  {
+    "seq": 21086,
+    "catName": "전기 완성차",
+    "price_at_live": 3100000,
+    "updated_at": 1784733442439
+  },
+  {
+    "seq": 21085,
+    "catName": "전기 완성차",
+    "price_at_live": 650000,
+    "updated_at": 1784733443659
+  },
+  {
+    "seq": 21083,
+    "catName": "전기 완성차",
+    "price_at_live": 1660000,
+    "updated_at": 1784733444581
+  },
+  {
+    "seq": 15882,
+    "catName": "전기 부속품",
+    "price_at_live": 450000,
+    "updated_at": 1784733445516
+  },
+  {
+    "seq": 15881,
+    "catName": "전기 부속품",
+    "price_at_live": 600000,
+    "updated_at": 1784733446422
+  },
+  {
+    "seq": 15880,
+    "catName": "전기 부속품",
+    "price_at_live": 100000,
+    "updated_at": 1784733447331
+  },
+  {
+    "seq": 15872,
+    "catName": "전기 부속품",
+    "price_at_live": 300000,
+    "updated_at": 1784733454392
+  },
+  {
+    "seq": 15864,
+    "catName": "전기 부속품",
+    "price_at_live": 200000,
+    "updated_at": 1784733456672
+  },
+  {
+    "seq": 15863,
+    "catName": "전기 부속품",
+    "price_at_live": 200000,
+    "updated_at": 1784733457580
+  },
+  {
+    "seq": 15641,
+    "catName": "전기 부속품",
+    "price_at_live": 1400000,
+    "updated_at": 1784733460455
+  }
+]
