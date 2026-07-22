@@ -17,8 +17,9 @@ jobs:
         with:
           node-version: '20'
 
+      # 🎯 기존 npm ci 대신 npm install로 수정하여 동기화 오류 방지
       - name: Install Dependencies
-        run: npm install # 👈 기존 npm ci 에서 npm install 로 변경
+        run: npm install
 
       - name: Run Main Scanner
         env:
@@ -26,3 +27,12 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: node index.js
+
+      # 💡 스캔 진행 시 갱신되는 데이터 파일(bhunt_*.json)을 GitHub에 자동 저장
+      - name: Commit and push updated DB files
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git add bhunt_*.json
+          git commit -m "chore: auto update B-Hunt DB files [skip ci]" || exit 0
+          git push
