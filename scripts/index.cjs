@@ -32,7 +32,7 @@ const BIKESELL_CATEGORIES = [
   { top: 'MARKET', section: 'MARKET24', name: '전기 부속품' }
 ];
 
-// 🎯 타임아웃 30초 (30000ms) 설정
+// 타임아웃 30초 (30000ms) 설정
 const AXIOS_CONFIG = {
   headers: {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
@@ -42,7 +42,7 @@ const AXIOS_CONFIG = {
     'Referer': 'https://bikesell.co.kr/site/board/list.asp'
   },
   responseType: 'arraybuffer',
-  timeout: 30000 // ⚡ 30초 타임아웃
+  timeout: 30000
 };
 
 function loadSoldDB() {
@@ -191,21 +191,17 @@ function generateLivePrompt(userSettings, textInput, chunkIndex, totalChunks) {
 ${textInput}`;
 }
 
-// 🎯 전체 패킷 상세 트레이싱 + 30초 1회 타임아웃 세션 수급 함수
+// 전체 패킷 상세 분석 모드 (로그인 세션 수급)
 async function getBikesellSession() {
   console.log('\n==================================================');
   console.log('🔬 [전체 패킷 심층 분석 모드] 로그인 시퀀스 가동 (30초 제한)');
   console.log('==================================================');
 
-  // URL 대소문자 및 도메인 정밀 트레이싱
   const loginPageUrl = 'https://bikesell.co.kr/site/im/login.asp';
   const loginOkUrl = 'https://bikesell.co.kr/site/im/login_ok.asp';
 
   let initialCookie = '';
 
-  // -------------------------------------------------------------------
-  // [1단계] GET 로그인 페이지 요청 패킷 분석
-  // -------------------------------------------------------------------
   console.log(`\n📤 [GET 요청 패킷]`);
   console.log(`• URL: ${loginPageUrl}`);
   console.log(`• 요청 헤더: ${JSON.stringify(AXIOS_CONFIG.headers, null, 2)}`);
@@ -213,7 +209,7 @@ async function getBikesellSession() {
   try {
     const initRes = await axios.get(loginPageUrl, {
       ...AXIOS_CONFIG,
-      validateStatus: (status) => status >= 200 && status < 600 // 404/500 에러도 캡처
+      validateStatus: (status) => status >= 200 && status < 600
     });
 
     console.log(`\n📥 [GET 응답 패킷]`);
@@ -231,7 +227,7 @@ async function getBikesellSession() {
     console.log(`• 📄 응답 본문 미리보기: "${initBodySnippet}"`);
 
     if (initRes.status === 404) {
-      console.log(`🚨 [404 원인 분석] GET 요청 URL 경로가 올바르지 않거나, 서버에서 직접 차단했습니다.`);
+      console.log(`🚨 [404 원인 분석] GET 요청 URL 경로를 확인하십시오.`);
       return '';
     }
 
@@ -244,9 +240,6 @@ async function getBikesellSession() {
     return '';
   }
 
-  // -------------------------------------------------------------------
-  // [2단계] cURL 명령어 출력 (터미널 수동 교차 검증용)
-  // -------------------------------------------------------------------
   const payloadString = 'formname=login&dolid=banst123&dolpass=bst511790&idcheck=ON';
   console.log('\n📋 [재현용 cURL 명령어]');
   console.log(`curl -v -X POST "${loginOkUrl}" \\`);
@@ -256,9 +249,6 @@ async function getBikesellSession() {
   if (initialCookie) console.log(`  -H "Cookie: ${initialCookie}" \\`);
   console.log(`  --data "${payloadString}"\n`);
 
-  // -------------------------------------------------------------------
-  // [3단계] POST 로그인 요청 패킷 분석
-  // -------------------------------------------------------------------
   const postHeaders = {
     ...AXIOS_CONFIG.headers,
     'Content-Type': 'application/x-www-form-urlencoded',
@@ -353,7 +343,7 @@ async function runBikesellScanner() {
         
         const tdMatches = tr.match(/<td[^>]*>([\s\S]*?)<\/td>/gi) || [];
         let dateStr = "";
-        for (const td mysterious td of tdMatches) {
+        for (const td of tdMatches) { // 👈 문법 오류 수정 완료
           const text = td.replace(/<[^>]*>/g, '').trim();
           if (/[\d]{1,2}(:|-|\.)[\d]{1,2}/.test(text)) dateStr = text;
         }
@@ -413,7 +403,7 @@ async function runBikesellScanner() {
     const livePrompt = generateLivePrompt(userSettings, chunkInput, 1, 1);
     try {
       const response = await ai.models.generateContent({ model: 'gemini-3.1-flash-lite', contents: [{ role: 'user', parts: [{ text: livePrompt }] }], config: { temperature: 0.2 } });
-      if (response.text && !response.text.includes('이번 주기가 패스합니다')) {
+      if (response.text && !response.text.includes('이번 주기는 패스합니다')) {
         await sendTelegramMessage(response.text);
       }
     } catch (err) {}
