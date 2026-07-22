@@ -27,11 +27,12 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: node scripts/index.js
 
+      # 💡 모든 변동 사항을 단일 커밋으로 안전하게 묶은 후 rebase & push 진행
       - name: Commit and push updated DB files
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          git add bhunt_*.json
+          git add .
           git commit -m "chore: auto update B-Hunt DB files [skip ci]" || exit 0
           git pull --rebase origin main
           git push
