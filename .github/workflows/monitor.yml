@@ -1,9 +1,6 @@
 name: Sell Monitor Test
 
 on:
-  # 15분마다 정기 자동 실행 (원하시는 주기로 수정 가능)
-  schedule:
-    - cron: '*/15 * * * *'
   # 외부 트리거 또는 GitHub 웹에서 수동 실행
   workflow_dispatch:
 
@@ -15,10 +12,10 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      # @v4 뒤에 최신 마이너 버전을 명시하여 Node 24 완벽 호환 보장
       - name: Checkout
         uses: actions/checkout@v4.2.2
         with:
-          # 커밋 권한을 보장하기 위해 기본 토큰 활용
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Use Node.js
@@ -35,7 +32,7 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: node scripts/monitor.js
 
-      # 🔥 핵심 보완: 업데이트된 seen_posts.json을 리포지토리에 영구 저장
+      # 🔥 [핵심] cache 대신 변경된 seen_posts.json을 레포지토리에 직접 커밋 및 푸시
       - name: Commit & Push updated seen_posts.json
         run: |
           git config --global user.name "github-actions[bot]"
