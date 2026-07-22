@@ -8,13 +8,13 @@ const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID;
 
-// 파일 저장 경로 정의
-const TRACKING_FILE = path.join(process.cwd(), 'last_seq.json');
-const SETTINGS_FILE = path.join(process.cwd(), 'user_settings.json');
-const REPORT_BACKUP_FILE = path.join(process.cwd(), 'latest_report.txt'); 
-const SOLD_DB_FILE = path.join(process.cwd(), 'sold_history.json');       // 누적 완판 마트
-const PENDING_DB_FILE = path.join(process.cwd(), 'pending_posts.json');   // 실시간 가격 실드 DB
-const PURCHASE_DB_FILE = path.join(process.cwd(), 'my_purchases.json');   // 사장님 직매입 전용 장부
+// 🎯 [격리 완료] 기존 seen_posts.json 계열과 충돌하지 않도록 독립 명칭 적용
+const TRACKING_FILE = path.join(process.cwd(), 'bhunt_last_seq.json');
+const SETTINGS_FILE = path.join(process.cwd(), 'bhunt_user_settings.json');
+const REPORT_BACKUP_FILE = path.join(process.cwd(), 'bhunt_latest_report.txt'); 
+const SOLD_DB_FILE = path.join(process.cwd(), 'bhunt_sold_history.json');       // 누적 완판 마트
+const PENDING_DB_FILE = path.join(process.cwd(), 'bhunt_pending_posts.json');   // 실시간 가격 실드 DB
+const PURCHASE_DB_FILE = path.join(process.cwd(), 'bhunt_my_purchases.json');   // 사장님 직매입 전용 장부
 
 const BIKESELL_CATEGORIES = [
   { top: 'MARKET', section: 'MARKET1',  name: '산악 완성차' },
@@ -154,7 +154,7 @@ async function checkTelegramCommands() {
       }
       else if (text === '/초기화') {
         if (fs.existsSync(TRACKING_FILE)) fs.unlinkSync(TRACKING_FILE);
-        console.log('🧹 [원격 로그] 기록 파일(last_seq.json) 강제 파괴 완료.');
+        console.log('🧹 [원격 로그] 기록 파일(bhunt_last_seq.json) 강제 파괴 완료.');
         await sendTelegramMessage(`🧹 [초기화 완료] 데이터 기록을 전면 삭제했습니다.`);
       }
       else if (text.startsWith('구매:')) {
