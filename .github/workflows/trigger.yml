@@ -17,12 +17,37 @@ jobs:
         with:
           node-version: '22'
 
-      - name: Install Dependencies
-        run: npm install
+      # ⚡ 1. npm 패키지(node_modules) 캐시 설정
+      - name: Cache Node Modules
+        id: npm-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-node-${{ hashFiles('**/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-node-
 
-      # 🎯 Playwright 브라우저 바이너리 및 필수 OS 패키지 자동 설치
-      - name: Install Playwright Browsers
+      # 🎯 캐시 미스 시에만 npm install 수행
+      - name: Install Dependencies
+        run: npm ci || npm install
+
+      # ⚡ 2. Playwright 브라우저 바이너리 캐시 설정
+      - name: Cache Playwright Browsers
+        id: playwright-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-${{ hashFiles('**/package-lock.json') }}
+
+      # 🎯 브라우저 캐시가 없을 때만 브라우저 및 OS 필수 라이브러리 일괄 설치
+      - name: Install Playwright Browsers & OS Deps
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
         run: npx playwright install --with-deps chromium
+
+      # 🎯 브라우저가 캐싱되어 있다면 OS 라이브러리만 경량 확인 (1~2초 소요)
+      - name: Install Playwright System Dependencies Only
+        if: steps.playwright-cache.outputs.cache-hit == 'true'
+        run: npx playwright install-deps chromium
 
       - name: Run Main Scanner
         env:
