@@ -2,19 +2,20 @@ const { GoogleGenAI } = require('@google/genai');
 const fs = require('fs');
 const path = require('path');
 const axios = require('axios');
+const { chromium } = require('playwright');
 
-// 🔑 구글 API 키 및 텔레그램 환경변수 바인딩
+// 🔑 환경변수 바인딩
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID;
 
-// 🎯 [격리 완료] 기존 seen_posts.json 계열과 충돌하지 않도록 독립 명칭 적용
+// 🎯 독립 데이터 저장 경로 정의
 const TRACKING_FILE = path.join(process.cwd(), 'bhunt_last_seq.json');
 const SETTINGS_FILE = path.join(process.cwd(), 'bhunt_user_settings.json');
 const REPORT_BACKUP_FILE = path.join(process.cwd(), 'bhunt_latest_report.txt'); 
-const SOLD_DB_FILE = path.join(process.cwd(), 'bhunt_sold_history.json');       // 누적 완판 마트
-const PENDING_DB_FILE = path.join(process.cwd(), 'bhunt_pending_posts.json');   // 실시간 가격 실드 DB
-const PURCHASE_DB_FILE = path.join(process.cwd(), 'bhunt_my_purchases.json');   // 사장님 직매입 전용 장부
+const SOLD_DB_FILE = path.join(process.cwd(), 'bhunt_sold_history.json');
+const PENDING_DB_FILE = path.join(process.cwd(), 'bhunt_pending_posts.json');
+const PURCHASE_DB_FILE = path.join(process.cwd(), 'bhunt_my_purchases.json');
 
 const BIKESELL_CATEGORIES = [
   { top: 'MARKET', section: 'MARKET1',  name: '산악 완성차' },
@@ -34,13 +35,13 @@ const BIKESELL_CATEGORIES = [
 
 const AXIOS_CONFIG = {
   headers: {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8',
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
     'Origin': 'https://bikesell.co.kr',
     'Referer': 'https://bikesell.co.kr/site/board/list.asp'
   },
   responseType: 'arraybuffer',
-  timeout: 30000 // 바이크셀 랙 유발 방지용 대기시간 30초 상향 보정
+  timeout: 45000
 };
 
 function loadSoldDB() {
@@ -220,59 +221,36 @@ async function checkTelegramCommands() {
         await sendTelegramMessage(`🚀 실시간 수색 및 감정 스캔을 강제 구동합니다.`);
         await runBikesellScanner(); 
       }
-      else if (text === '/추세') {
-        console.log('📊 [원격 로그] 마스터 통합 추세 분석 강제 정산 가동.');
-        await sendTelegramMessage(`📊 현재까지 누적된 장부를 기반으로 즉시 추세 분석을 강제 정산합니다.`);
-        
-        let soldDB = loadSoldDB();
-        let purchaseDB = loadPurchaseDB();
-        let combinedTrendInput = "";
-        let reportedItemsPool = [];
-
-        for (const cat of BIKESELL_CATEGORIES) {
-          let unreportedItems = soldDB.filter(p => p.catName === cat.name && p.is_reported !== true);
-          if (unreportedItems.length > 0) {
-            let soldDBText = "";
-            unreportedItems.forEach(p => {
-              const isMyBuy = purchaseDB.some(m => m.seq === p.seq);
-              soldDBText += `• ${p.title} ➔ 최종실거래가: ${p.price_parsed > 0 ? p.price_parsed.toLocaleString() + '원' : '금액유실'} ${isMyBuy ? '(★내매입)' : ''}\n`;
-            });
-
-            let matchPurchases = purchaseDB.filter(p => p.catName === cat.name);
-            let purchaseDBText = "";
-            matchPurchases.forEach(p => {
-              purchaseDBText += `• 번호 ${p.seq} ➔ 매입가: ${p.price_parsed.toLocaleString()}원 (${p.title})\n`;
-            });
-
-            combinedTrendInput += `\n### 📋 [게시판 분류]: ${cat.name}\n`;
-            combinedTrendInput += `[중고장터 완판 장부]:\n${soldDBText}\n`;
-            combinedTrendInput += `[사장님 실매입 이력]:\n${purchaseDBText || "최근 매입 데이터 없음"}\n`;
-            combinedTrendInput += `-------------------------------------------\n`;
-            reportedItemsPool.push(...unreportedItems);
-          }
-        }
-
-        if (combinedTrendInput.length > 0) {
-          const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
-          const masterTrendPrompt = generateMasterTrendPrompt(settings, combinedTrendInput);
-          try {
-            const response = await ai.models.generateContent({ 
-              model: 'gemini-3.1-flash-lite', 
-              contents: [{ role: 'user', parts: [{ text: masterTrendPrompt }] }], 
-              config: { temperature: 0.1 } 
-            });
-            await sendTelegramMessage(response.text);
-            reportedItemsPool.forEach(p => { p.is_reported = true; });
-            saveSoldDB(soldDB);
-          } catch (err) {
-            await sendTelegramMessage(`🚨 [강제 추세 가동 에러] ${err.message}`);
-          }
-        } else {
-          await sendTelegramMessage(`☕ 현재 새로 누적된 미보고 완판 데이터(is_reported: false)가 장부에 단 1개도 없습니다.`);
-        }
-      }
     }
   } catch (err) {}
+}
+
+async function getBikesellSessionViaPlaywright() {
+  console.log('🌐 [Playwright] 헤드리스 브라우저 로그인 시도...');
+  const browser = await chromium.launch({ headless: true });
+  const context = await browser.newContext({
+    userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
+  });
+  const page = await context.newPage();
+
+  try {
+    await page.goto('https://bikesell.co.kr/site/im/login.asp', { waitUntil: 'networkidle', timeout: 30000 });
+    await page.fill('input[name="dolid"]', 'banst123');
+    await page.fill('input[name="dolpass"]', 'bst511790');
+    await page.click('input[type="submit"], button[type="submit"], img[src*="login"]');
+    await page.waitForTimeout(2000);
+
+    const cookies = await context.cookies();
+    await browser.close();
+
+    const cookieHeader = cookies.map(c => `${c.name}=${c.value}`).join('; ');
+    console.log('✅ [Playwright] 로그인 세션 쿠키 추출 완료.');
+    return cookieHeader;
+  } catch (err) {
+    await browser.close();
+    console.log(`⚠️ [Playwright 로그인 경고] ${err.message}. 비회원 모드로 수색을 계속 진행합니다.`);
+    return '';
+  }
 }
 
 function generateLivePrompt(userSettings, textInput, chunkIndex, totalChunks) {
@@ -363,27 +341,30 @@ async function runBikesellScanner() {
   }
   const updatedTrackingData = { ...trackingData };
 
-  let sessionCookie = '';
-  try {
-    const loginOkUrl = 'https://bikesell.co.kr/site/im/login_ok.asp';
-    const params = new URLSearchParams();
-    params.append('formname', 'login');
-    params.append('dolid', 'banst123');
-    params.append('dolpass', 'bst511790');
-    params.append('idcheck', 'ON');
+  // 1. Playwright 기반 쿠키 수급 시도 (실패 시 axios fallback)
+  let sessionCookie = await getBikesellSessionViaPlaywright();
 
-    const loginRes = await axios.post(loginOkUrl, params.toString(), {
-      ...AXIOS_CONFIG,
-      maxRedirects: 0,
-      validateStatus: (status) => status >= 200 && status < 400 
-    });
+  if (!sessionCookie) {
+    try {
+      const loginOkUrl = 'https://bikesell.co.kr/site/im/login_ok.asp';
+      const params = new URLSearchParams();
+      params.append('formname', 'login');
+      params.append('dolid', 'banst123');
+      params.append('dolpass', 'bst511790');
+      params.append('idcheck', 'ON');
 
-    if (loginRes.headers['set-cookie']) {
-      sessionCookie = loginRes.headers['set-cookie'].map(c => c.split(';')[0]).join('; ');
+      const loginRes = await axios.post(loginOkUrl, params.toString(), {
+        ...AXIOS_CONFIG,
+        maxRedirects: 0,
+        validateStatus: (status) => status >= 200 && status < 400 
+      });
+
+      if (loginRes.headers['set-cookie']) {
+        sessionCookie = loginRes.headers['set-cookie'].map(c => c.split(';')[0]).join('; ');
+      }
+    } catch (err) { 
+      console.log(`⚠️ [Direct HTTP 로그인 생략] 기존 비회원 데이터 구조로 탐색을 진행합니다.`);
     }
-  } catch (err) { 
-    console.log(`🚨 [로그인 실패] ${err.message}`);
-    return; 
   }
 
   const requestConfig = { ...AXIOS_CONFIG, headers: { ...AXIOS_CONFIG.headers, 'Cookie': sessionCookie } };
