@@ -33,7 +33,8 @@ const BOARDS = [
 ];
 
 // 프로젝트 최상위 루트 경로 지정 (scripts/.. -> 루트)
-const SEEN_FILE = path.resolve(__dirname, '..', 'seen_posts.json');
+const seenFileName = process.env.SEEN_FILE_NAME || 'seen_posts.json';
+const SEEN_FILE = path.resolve(__dirname, '..', seenFileName);
 const CONFIG_FILE = path.resolve(__dirname, '..', 'filter_config.json');
 
 function loadSeenIds() {
