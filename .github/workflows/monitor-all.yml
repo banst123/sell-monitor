@@ -1,13 +1,8 @@
 name: Sell Monitor All (No Filter)
 
 on:
-  # 1시간 주기 자동 실행 (cron 필요 시 활성화)
-  # schedule:
-  #   - cron: '0 * * * *'
-  # 외부 트리거 또는 GitHub 웹에서 수동 실행
   workflow_dispatch:
 
-# 🎯 Repository에 변경된 seen_posts.json을 커밋/푸시하기 위해 write 권한을 부여합니다.
 permissions:
   contents: write
 
@@ -39,13 +34,15 @@ jobs:
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          # 💡 전체 모니터링 전용 기록 파일명 지정
+          SEEN_FILE_NAME: 'seen_posts_all.json'
         run: node scripts/monitor.js
 
-      # 🔥 핵심: 탐색 내역(seen_posts.json)을 레포지토리에 커밋 & 푸시하여 영구 보존
-      - name: Commit & Push updated seen_posts.json
+      # 🔥 seen_posts_all.json 파일만 독립적으로 커밋 & 푸시
+      - name: Commit & Push updated seen_posts_all.json
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          git add seen_posts.json
-          git commit -m "chore: update seen_posts.json (All) [skip ci]" || exit 0
+          git add seen_posts_all.json
+          git commit -m "chore: update seen_posts_all.json [skip ci]" || exit 0
           git push
