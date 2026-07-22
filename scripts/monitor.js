@@ -11,6 +11,7 @@ import { fileURLToPath } from 'url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+// 환경변수 검증
 const TOKEN = process.env.TELEGRAM_TOKEN;
 const CHAT_ID = process.env.TELEGRAM_CHAT_ID;
 
@@ -19,6 +20,7 @@ if (!TOKEN || !CHAT_ID) {
   process.exit(1);
 }
 
+// 모니터링 대상 게시판 목록
 const BOARDS = [
   { name: '산악완성차 중고장터', url: 'https://bikesell.co.kr/site/board/list.asp?doltop=MARKET&dolsection=MARKET1', mobileUrl: 'https://bikesell.co.kr/site/m/list.asp?doltop=MARKET&dolsection=MARKET1' },
   { name: '산악프레임 중고장터', url: 'https://bikesell.co.kr/site/board/list.asp?doltop=MARKET&dolsection=MARKET2', mobileUrl: 'https://bikesell.co.kr/site/m/list.asp?doltop=MARKET&dolsection=MARKET2' },
@@ -30,17 +32,24 @@ const BOARDS = [
   { name: '미니벨로 부품장터', url: 'https://bikesell.co.kr/site/board/list.asp?doltop=MARKET&dolsection=MARKET34', mobileUrl: 'https://bikesell.co.kr/site/m/list.asp?doltop=MARKET&dolsection=MARKET34' }
 ];
 
-const SEEN_FILE = path.join(__dirname, '..', 'seen_posts.json');
-const CONFIG_FILE = path.join(__dirname, '..', 'filter_config.json');
+// 💡 monitor.js와 동일한 scripts 폴더 내부에 안전하게 데이터 저장
+const SEEN_FILE = path.join(__dirname, 'seen_posts.json');
+const CONFIG_FILE = path.join(__dirname, 'filter_config.json');
 
 function loadSeenIds() {
   try {
-    if (!fs.existsSync(SEEN_FILE)) return new Set();
+    if (!fs.existsSync(SEEN_FILE)) {
+      console.log('[SYSTEM] seen_posts.json 파일이 없어 신규 생성합니다.');
+      return new Set();
+    }
     const raw = fs.readFileSync(SEEN_FILE, 'utf8');
     const arr = JSON.parse(raw);
     if (!Array.isArray(arr)) return new Set();
+    
+    console.log(`[SYSTEM] 기존 탐색 기록 ${arr.length}개 로드 완료`);
     return new Set(arr);
   } catch (e) {
+    console.error('[ERROR] seen_posts.json 읽기 오류:', e.message);
     return new Set();
   }
 }
@@ -48,12 +57,14 @@ function loadSeenIds() {
 function saveSeenIds(set) {
   try {
     let arr = Array.from(set);
-    if (arr.length >= 200) {
-      arr = arr.slice(-100);
+    // 기록을 최대 2,000개까지 안전하게 유지 (초과 시에만 예전 데이터 1,000개 정리)
+    if (arr.length > 2000) {
+      arr = arr.slice(-1000);
     }
     fs.writeFileSync(SEEN_FILE, JSON.stringify(arr, null, 2), 'utf8');
+    console.log(`[SYSTEM] seen_posts.json 저장 완료 (총 ${arr.length}개 기록됨)`);
   } catch (e) {
-    console.error('[ERROR] seen_posts.json 저장 오류:', e);
+    console.error('[ERROR] seen_posts.json 저장 오류:', e.message);
   }
 }
 
@@ -67,7 +78,7 @@ function loadFilterConfig() {
   }
 }
 
-function httpGet(url) {
+function httpGet(url, timeoutMs = 10000) {
   return new Promise((resolve, reject) => {
     const req = https.get(url, {
       headers: {
@@ -79,6 +90,12 @@ function httpGet(url) {
       res.on('data', (chunk) => chunks.push(chunk));
       res.on('end', () => resolve(iconv.decode(Buffer.concat(chunks), 'euc-kr')));
     });
+
+    req.setTimeout(timeoutMs, () => {
+      req.destroy();
+      reject(new Error('네트워크 요청 시간 초과 (Timeout)'));
+    });
+
     req.on('error', (err) => reject(err));
   });
 }
@@ -115,12 +132,11 @@ function escapeHtml(text) {
   return (text || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
-// 🎯 [정밀 튜닝] 서버 텍스트 스트림 맞춤형 라인 스캔 파서
+// 서버 텍스트 스트림 맞춤형 라인 스캔 파서
 function parseList(html, board) {
   const $ = cheerio.load(html);
   const results = [];
 
-  // 1단계: 링크 일치시킬 고유 seq Map 빌드
   const seqMap = new Map();
   $('a[href*="content.asp"]').each((_, el) => {
     const href = $(el).attr('href') || '';
@@ -134,21 +150,16 @@ function parseList(html, board) {
     }
   });
 
-  // 2단계: 텍스트 줄바꿈 슬라이싱
   const pageText = $('body').text();
   const lines = pageText.split('\n').map(l => l.trim()).filter(l => l.length > 0);
-
-  // 3단계: 날짜를 기준으로 위쪽 라인 역추적 매칭
   const dateRegex = /(\d{4}-\d{2}-\d{2})|((오전|오후)\s*\d+:\d+)|(^\d{2}:\d{2}$)/;
 
   for (let i = 2; i < lines.length; i++) {
     const currentDateLine = lines[i];
 
     if (dateRegex.test(currentDateLine)) {
-      // 날짜 한 줄 위(i-1)가 무조건 순수 작성자(닉네임)
       let writer = lines[i - 1];
 
-      // 시스템 필터링 및 예외처리
       if (/중고|장터|산악|완성차|부속|부품|댓글|공지|조회|추천|현재위치|로그인/i.test(writer) || writer.length > 16) {
         continue;
       }
@@ -156,16 +167,13 @@ function parseList(html, board) {
       let title = '';
       let seq = '';
 
-      // 작성자 위쪽으로 탐색하면서 seqMap에 등록된 제목이 존재하는지 역추적 (보통 i-2 또는 i-3에 위치)
       for (let j = 1; j <= 4; j++) {
         if (i - j < 0) break;
         const potentialTitle = lines[i - j - 1];
         if (!potentialTitle) continue;
 
-        // 링크 맵에서 매칭 시도
         let foundSeq = seqMap.get(potentialTitle);
         if (!foundSeq) {
-          // 공백 등 미세 오차가 있을 때 부분 매칭 검증
           for (let [tKey, sVal] of seqMap.entries()) {
             if (tKey.includes(potentialTitle) || potentialTitle.includes(tKey)) {
               if (potentialTitle.length > 3) {
@@ -183,7 +191,6 @@ function parseList(html, board) {
         }
       }
 
-      // 제목과 고유 주소를 모두 찾았을 때만 최종 매물로 확보
       if (title && seq) {
         const id = `${board.name}_${seq}`;
         if (results.some(p => p.id === id)) continue;
@@ -210,8 +217,8 @@ function parseList(html, board) {
   console.log('[START] 바이크셀 8개 통합 장터 구동 엔진 (서버 스트림 최적화본)');
   console.log('====================================================');
 
-  const seen = loadSeenIds();
-  const newSeen = new Set(seen);
+  // 💡 loadSeenIds()의 리턴값(Set)을 그대로 할당하여 변환 과정에서의 데이터 누실 방지
+  const newSeen = loadSeenIds();
   const newPosts = [];
   const FILTER_CONFIG = loadFilterConfig();
 
@@ -222,7 +229,7 @@ function parseList(html, board) {
       try { 
         html = await httpGet(board.url); 
       } catch (e) { 
-        console.error(`   └ [실패] 연결 오류: ${e.message}`);
+        console.error(`    └ [실패] 연결 오류: ${e.message}`);
         continue; 
       }
 
@@ -242,6 +249,7 @@ function parseList(html, board) {
       return;
     }
 
+    // 최신 수집 데이터 파일에 기록
     saveSeenIds(newSeen);
 
     const groupedData = {};
@@ -315,7 +323,7 @@ function parseList(html, board) {
         localMessageLines.push(
           `<b>${simpleIdx} ${displayTitle}</b>${writerAlert}`,
           `👤 작성자: <code>${displayWriter}</code>`,
-          `🛠️ 디버그: <i>${displayReason} (ID: ${currentPost.id})</i>`,
+          `🛠️ 참고: <i>${displayReason}</i>`,
           `🔗 링크: <a href="${mobileUrl}">[📱모바일]</a> / <a href="${desktopUrl}">[💻PC]</a>\n`
         );
       }
@@ -325,9 +333,9 @@ function parseList(html, board) {
 
       try {
         await sendTelegramMessage(finalCombinedText);
-        console.log(`   [OK] 텔레그램 발송 완료 -> ${boardName}`);
+        console.log(`    [OK] 텔레그램 발송 완료 -> ${boardName}`);
       } catch (e) {
-        console.error(`   [ERROR] 발송 실패:`, e.message);
+        console.error(`    [ERROR] 발송 실패:`, e.message);
       }
     }
     console.log('\n[FINISH] 모니터링 주기가 안정적으로 종료되었습니다.');
