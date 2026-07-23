@@ -13,15 +13,16 @@ const FILTER_FILE = path.resolve(__dirname, '..', 'filter_config.json');
 const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN;
 const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID;
 
+// ⚡ PC 표준 URL로 변경 (파싱 안정성 극대화)
 const BOARDS = [
-  { name: '산악완성차 중고장터', url: 'http://www.bikesell.co.kr/m/m_board.asp?board=sub01' },
-  { name: '산악프레임 중고장터', url: 'http://www.bikesell.co.kr/m/m_board.asp?board=sub02' },
-  { name: '산악 샥포크 중고장터', url: 'http://www.bikesell.co.kr/m/m_board.asp?board=sub03' },
-  { name: '산악부속 중고장터', url: 'http://www.bikesell.co.kr/m/m_board.asp?board=sub04' },
-  { name: '전기자전거 부품장터', url: 'http://www.bikesell.co.kr/m/m_board.asp?board=pas02' },
-  { name: '전기자전거 완성차장터', url: 'http://www.bikesell.co.kr/m/m_board.asp?board=pas01' },
-  { name: '미니벨로 완성차장터', url: 'http://www.bikesell.co.kr/m/m_board.asp?board=sub08' },
-  { name: '미니벨로 부품장터', url: 'http://www.bikesell.co.kr/m/m_board.asp?board=sub09' }
+  { name: '산악완성차 중고장터', url: 'http://www.bikesell.co.kr/board/board.asp?board=sub01' },
+  { name: '산악프레임 중고장터', url: 'http://www.bikesell.co.kr/board/board.asp?board=sub02' },
+  { name: '산악 샥포크 중고장터', url: 'http://www.bikesell.co.kr/board/board.asp?board=sub03' },
+  { name: '산악부속 중고장터', url: 'http://www.bikesell.co.kr/board/board.asp?board=sub04' },
+  { name: '전기자전거 부품장터', url: 'http://www.bikesell.co.kr/board/board.asp?board=pas02' },
+  { name: '전기자전거 완성차장터', url: 'http://www.bikesell.co.kr/board/board.asp?board=pas01' },
+  { name: '미니벨로 완성차장터', url: 'http://www.bikesell.co.kr/board/board.asp?board=sub08' },
+  { name: '미니벨로 부품장터', url: 'http://www.bikesell.co.kr/board/board.asp?board=sub09' }
 ];
 
 function loadLastSeenIds() {
@@ -89,7 +90,7 @@ function sendTelegramMessage(text) {
 
 async function run() {
   console.log('====================================================');
-  console.log('[START] 바이크셀 8개 통합 장터 구동 엔진 (게시글 ID 기준)');
+  console.log('[START] 바이크셀 8개 통합 장터 구동 엔진 (PC 표준 파싱)');
   console.log('====================================================');
 
   const lastSeenIds = loadLastSeenIds();
@@ -108,43 +109,42 @@ async function run() {
     const lastId = lastSeenIds[board.name] || 0;
 
     try {
-      // networkidle 대기로 완전한 DOM 구성 확보
-      await page.goto(board.url, { waitUntil: 'networkidle', timeout: 30000 });
+      await page.goto(board.url, { waitUntil: 'domcontentloaded', timeout: 30000 });
 
-      // 범용 파싱 알고리즘
+      // ⚡ 바이크셀 게시판 전용 정밀 테이블 파싱
       const posts = await page.evaluate(() => {
         const results = [];
         const seenCodes = new Set();
 
-        // 모든 a 태그 및 onclick 속성 요소 탐색
-        const elements = Array.from(document.querySelectorAll('a, [onclick]'));
+        // 게시판 내부 모든 tr 요소 조사
+        const rows = Array.from(document.querySelectorAll('tr'));
 
-        elements.forEach(el => {
-          const href = el.getAttribute('href') || '';
-          const onclick = el.getAttribute('onclick') || '';
-          const combinedTarget = href + ' ' + onclick;
+        rows.forEach(row => {
+          const link = row.querySelector('a[href*="code="]');
+          if (!link) return;
 
-          // code=숫자 패턴 정규식 추출
-          const match = combinedTarget.match(/code=(\d+)/i);
+          const href = link.getAttribute('href') || '';
+          const match = href.match(/code=(\d+)/i);
           if (!match) return;
 
           const id = parseInt(match[1], 10);
           if (seenCodes.has(id)) return;
 
-          const title = el.innerText.replace(/\s+/g, ' ').trim();
+          const title = link.innerText.replace(/\s+/g, ' ').trim();
           if (!title || title.length < 2) return;
 
           seenCodes.add(id);
 
-          // 부모 컨테이너 탐색을 통한 작성자 정제
-          const parent = el.closest('tr, li, div, td');
+          // 작성자 텍스트 추출 (보통 tr 내 td 항목 중 지정)
+          const tds = Array.from(row.querySelectorAll('td'));
           let writer = '';
-          if (parent) {
-            const writerNode = parent.querySelector('.writer, .author, font, td:nth-child(3)');
-            if (writerNode) {
-              writer = writerNode.innerText.trim();
+          tds.forEach(td => {
+            const text = td.innerText.trim();
+            // 글자수가 짧고 정수/날짜 형태가 아닌 텍스트를 작성자로 추정
+            if (text && text.length > 1 && text.length < 12 && !/^\d+$/.test(text) && !text.includes('-') && !text.includes(':')) {
+              if (text !== title) writer = text;
             }
-          }
+          });
 
           results.push({ id, title, writer });
         });
@@ -186,7 +186,7 @@ async function run() {
               title: post.title,
               writer: post.writer,
               reason: matchReason,
-              url: `http://www.bikesell.co.kr/m/m_board_view.asp?code=${post.id}`
+              url: `http://www.bikesell.co.kr/board/board_view.asp?code=${post.id}`
             });
           }
         });
