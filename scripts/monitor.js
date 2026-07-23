@@ -28,9 +28,7 @@ function loadLastSeenIds() {
   if (fs.existsSync(SEEN_FILE)) {
     try {
       const data = JSON.parse(fs.readFileSync(SEEN_FILE, 'utf8'));
-      if (Array.isArray(data)) {
-        return {};
-      }
+      if (Array.isArray(data)) return {};
       return data;
     } catch (e) {
       return {};
@@ -110,29 +108,36 @@ async function run() {
     const lastId = lastSeenIds[board.name] || 0;
 
     try {
-      await page.goto(board.url, { waitUntil: 'domcontentloaded', timeout: 30000 });
+      // networkidle 대기로 완전한 DOM 구성 확보
+      await page.goto(board.url, { waitUntil: 'networkidle', timeout: 30000 });
 
-      // ⚡ 바이크셀 모바일 페이지 전용 강력한 파싱 로직
+      // 범용 파싱 알고리즘
       const posts = await page.evaluate(() => {
-        const anchors = Array.from(document.querySelectorAll('a[href*="code="]'));
         const results = [];
         const seenCodes = new Set();
 
-        anchors.forEach(a => {
-          const href = a.getAttribute('href') || '';
-          const match = href.match(/code=(\d+)/);
+        // 모든 a 태그 및 onclick 속성 요소 탐색
+        const elements = Array.from(document.querySelectorAll('a, [onclick]'));
+
+        elements.forEach(el => {
+          const href = el.getAttribute('href') || '';
+          const onclick = el.getAttribute('onclick') || '';
+          const combinedTarget = href + ' ' + onclick;
+
+          // code=숫자 패턴 정규식 추출
+          const match = combinedTarget.match(/code=(\d+)/i);
           if (!match) return;
 
           const id = parseInt(match[1], 10);
           if (seenCodes.has(id)) return;
-          seenCodes.add(id);
 
-          // 제목 추출
-          const title = a.innerText.replace(/\s+/g, ' ').trim();
+          const title = el.innerText.replace(/\s+/g, ' ').trim();
           if (!title || title.length < 2) return;
 
-          // 작성자 추출 (부모/인접 요소 탐색)
-          const parent = a.closest('tr, li, div');
+          seenCodes.add(id);
+
+          // 부모 컨테이너 탐색을 통한 작성자 정제
+          const parent = el.closest('tr, li, div, td');
           let writer = '';
           if (parent) {
             const writerNode = parent.querySelector('.writer, .author, font, td:nth-child(3)');
@@ -141,7 +146,7 @@ async function run() {
             }
           }
 
-          results.push({ id, title, writer, href });
+          results.push({ id, title, writer });
         });
 
         return results;
@@ -155,7 +160,7 @@ async function run() {
       const maxFetchedId = Math.max(...posts.map(p => p.id));
       console.log(`└ [파싱 완료] ${board.name} -> 수집 ${posts.length}개 / 최신글 ID: ${maxFetchedId} (이전 탐색 ID: ${lastId})`);
 
-      // 신규 게시글 감지
+      // 신규 게시글 선별
       const newPosts = posts.filter(p => p.id > lastId);
 
       if (newPosts.length > 0) {
