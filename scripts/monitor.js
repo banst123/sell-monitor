@@ -13,35 +13,40 @@ const FILTER_FILE = path.resolve(__dirname, '..', 'filter_config.json');
 const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN;
 const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID;
 
-// ⚡ PC 표준 URL로 변경 (파싱 안정성 극대화)
 const BOARDS = [
-  { name: '산악완성차 중고장터', url: 'http://www.bikesell.co.kr/board/board.asp?board=sub01' },
-  { name: '산악프레임 중고장터', url: 'http://www.bikesell.co.kr/board/board.asp?board=sub02' },
-  { name: '산악 샥포크 중고장터', url: 'http://www.bikesell.co.kr/board/board.asp?board=sub03' },
-  { name: '산악부속 중고장터', url: 'http://www.bikesell.co.kr/board/board.asp?board=sub04' },
-  { name: '전기자전거 부품장터', url: 'http://www.bikesell.co.kr/board/board.asp?board=pas02' },
-  { name: '전기자전거 완성차장터', url: 'http://www.bikesell.co.kr/board/board.asp?board=pas01' },
-  { name: '미니벨로 완성차장터', url: 'http://www.bikesell.co.kr/board/board.asp?board=sub08' },
-  { name: '미니벨로 부품장터', url: 'http://www.bikesell.co.kr/board/board.asp?board=sub09' }
+  { name: '산악완성차 중고장터', url: 'http://www.bikesell.co.kr/m/m_board.asp?board=sub01' },
+  { name: '산악프레임 중고장터', url: 'http://www.bikesell.co.kr/m/m_board.asp?board=sub02' },
+  { name: '산악 샥포크 중고장터', url: 'http://www.bikesell.co.kr/m/m_board.asp?board=sub03' },
+  { name: '산악부속 중고장터', url: 'http://www.bikesell.co.kr/m/m_board.asp?board=sub04' },
+  { name: '전기자전거 부품장터', url: 'http://www.bikesell.co.kr/m/m_board.asp?board=pas02' },
+  { name: '전기자전거 완성차장터', url: 'http://www.bikesell.co.kr/m/m_board.asp?board=pas01' },
+  { name: '미니벨로 완성차장터', url: 'http://www.bikesell.co.kr/m/m_board.asp?board=sub08' },
+  { name: '미니벨로 부품장터', url: 'http://www.bikesell.co.kr/m/m_board.asp?board=sub09' }
 ];
 
-function loadLastSeenIds() {
+// 기존 탐색 기록 로드 (Set으로 중복 관리)
+function loadSeenPosts() {
   if (fs.existsSync(SEEN_FILE)) {
     try {
       const data = JSON.parse(fs.readFileSync(SEEN_FILE, 'utf8'));
-      if (Array.isArray(data)) return {};
-      return data;
+      if (Array.isArray(data)) {
+        console.log(`[SYSTEM] 기존 탐색 기록 ${data.length}개 로드 완료 (${SEEN_FILE})`);
+        return new Set(data);
+      }
     } catch (e) {
-      return {};
+      console.error('[WARN] seen_posts.json 읽기 오류. 새로 생성합니다.');
     }
   }
-  return {};
+  return new Set();
 }
 
-function saveLastSeenIds(lastSeenIds) {
-  fs.writeFileSync(SEEN_FILE, JSON.stringify(lastSeenIds, null, 2), 'utf8');
+// 탐색 기록 저장
+function saveSeenPosts(seenSet) {
+  const data = Array.from(seenSet);
+  fs.writeFileSync(SEEN_FILE, JSON.stringify(data, null, 2), 'utf8');
 }
 
+// 필터 설정 로드
 function loadFilterConfig() {
   if (fs.existsSync(FILTER_FILE)) {
     try {
@@ -59,6 +64,7 @@ function loadFilterConfig() {
   return { KEYWORDS: [], WRITERS: [] };
 }
 
+// 텔레그램 알림 전송
 function sendTelegramMessage(text) {
   if (!TELEGRAM_TOKEN || !TELEGRAM_CHAT_ID) {
     console.log('[TELEGRAM SKIPPED] 토큰 또는 Chat ID 미설정');
@@ -90,10 +96,10 @@ function sendTelegramMessage(text) {
 
 async function run() {
   console.log('====================================================');
-  console.log('[START] 바이크셀 8개 통합 장터 구동 엔진 (PC 표준 파싱)');
+  console.log('[START] 바이크셀 8개 통합 장터 구동 엔진');
   console.log('====================================================');
 
-  const lastSeenIds = loadLastSeenIds();
+  const seenPosts = loadSeenPosts();
   const filterConfig = loadFilterConfig();
 
   const browser = await chromium.launch({ headless: true });
@@ -102,117 +108,89 @@ async function run() {
   });
   const page = await context.newPage();
 
-  let totalMatchedPosts = [];
+  let matchedPosts = [];
 
   for (const board of BOARDS) {
     console.log(`\n[진입] ${board.name} 데이터 수집 중...`);
-    const lastId = lastSeenIds[board.name] || 0;
 
     try {
       await page.goto(board.url, { waitUntil: 'domcontentloaded', timeout: 30000 });
 
-      // ⚡ 바이크셀 게시판 전용 정밀 테이블 파싱
       const posts = await page.evaluate(() => {
+        const rows = Array.from(document.querySelectorAll('table tr, ul li, .board_list tr'));
         const results = [];
-        const seenCodes = new Set();
-
-        // 게시판 내부 모든 tr 요소 조사
-        const rows = Array.from(document.querySelectorAll('tr'));
 
         rows.forEach(row => {
-          const link = row.querySelector('a[href*="code="]');
-          if (!link) return;
+          const linkEl = row.querySelector('a[href*="code="], a[href*="board="]');
+          if (!linkEl) return;
 
-          const href = link.getAttribute('href') || '';
-          const match = href.match(/code=(\d+)/i);
+          const href = linkEl.getAttribute('href') || '';
+          const match = href.match(/code=(\d+)/);
           if (!match) return;
 
-          const id = parseInt(match[1], 10);
-          if (seenCodes.has(id)) return;
+          const id = match[1];
+          const title = linkEl.innerText.trim();
 
-          const title = link.innerText.replace(/\s+/g, ' ').trim();
-          if (!title || title.length < 2) return;
+          const writerEl = row.querySelector('.writer, .author, td:nth-child(3)');
+          const writer = writerEl ? writerEl.innerText.trim() : '';
 
-          seenCodes.add(id);
-
-          // 작성자 텍스트 추출 (보통 tr 내 td 항목 중 지정)
-          const tds = Array.from(row.querySelectorAll('td'));
-          let writer = '';
-          tds.forEach(td => {
-            const text = td.innerText.trim();
-            // 글자수가 짧고 정수/날짜 형태가 아닌 텍스트를 작성자로 추정
-            if (text && text.length > 1 && text.length < 12 && !/^\d+$/.test(text) && !text.includes('-') && !text.includes(':')) {
-              if (text !== title) writer = text;
-            }
-          });
-
-          results.push({ id, title, writer });
+          if (id && title) {
+            results.push({ id, title, writer, href });
+          }
         });
 
         return results;
       });
 
-      if (posts.length === 0) {
-        console.log(`└ [수집 실패] ${board.name} -> DOM 파싱된 게시글 없음`);
-        continue;
-      }
+      console.log(`└ [파싱 완료] ${board.name} -> 총 ${posts.length}개 매물 정제 완료`);
 
-      const maxFetchedId = Math.max(...posts.map(p => p.id));
-      console.log(`└ [파싱 완료] ${board.name} -> 수집 ${posts.length}개 / 최신글 ID: ${maxFetchedId} (이전 탐색 ID: ${lastId})`);
+      posts.forEach(post => {
+        // 이미 확인한 게시물이면 스킵
+        if (seenPosts.has(post.id)) return;
 
-      // 신규 게시글 선별
-      const newPosts = posts.filter(p => p.id > lastId);
+        // 새 매물이면 탐색 기록에 추가
+        seenPosts.add(post.id);
 
-      if (newPosts.length > 0) {
-        console.log(`  └ 🆕 신규 게시글 ${newPosts.length}건 감지! 필터 대조를 진행합니다.`);
+        // 키워드 및 작성자 필터링
+        const matchedKeyword = filterConfig.KEYWORDS.find(kw =>
+          post.title.toLowerCase().includes(kw.toLowerCase())
+        );
+        const matchedWriter = filterConfig.WRITERS.find(wr =>
+          wr && post.writer.toLowerCase().includes(wr.toLowerCase())
+        );
 
-        newPosts.forEach(post => {
-          const matchedKeyword = filterConfig.KEYWORDS.find(kw => 
-            post.title.toLowerCase().includes(kw.toLowerCase())
-          );
-          const matchedWriter = filterConfig.WRITERS.find(wr => 
-            wr && post.writer.toLowerCase().includes(wr.toLowerCase())
-          );
+        if (matchedKeyword || matchedWriter) {
+          const matchReason = [
+            matchedKeyword ? `키워드 [${matchedKeyword}]` : '',
+            matchedWriter ? `작성자 [${matchedWriter}]` : ''
+          ].filter(Boolean).join(' / ');
 
-          if (matchedKeyword || matchedWriter) {
-            const matchReason = [
-              matchedKeyword ? `키워드 [${matchedKeyword}]` : '',
-              matchedWriter ? `작성자 [${matchedWriter}]` : ''
-            ].filter(Boolean).join(' / ');
-
-            totalMatchedPosts.push({
-              boardName: board.name,
-              id: post.id,
-              title: post.title,
-              writer: post.writer,
-              reason: matchReason,
-              url: `http://www.bikesell.co.kr/board/board_view.asp?code=${post.id}`
-            });
-          }
-        });
-
-        lastSeenIds[board.name] = maxFetchedId;
-      } else {
-        console.log(`  └ [변동 없음] 신규 게시글이 없습니다.`);
-        if (!lastSeenIds[board.name]) {
-          lastSeenIds[board.name] = maxFetchedId;
+          matchedPosts.push({
+            boardName: board.name,
+            id: post.id,
+            title: post.title,
+            writer: post.writer,
+            reason: matchReason,
+            url: `http://www.bikesell.co.kr/m/m_board_view.asp?code=${post.id}`
+          });
         }
-      }
+      });
 
     } catch (err) {
-      console.error(`└ [실패] ${board.name} 연결 오류:`, err.message);
+      console.error(`└ [실패] 연결 오류:`, err.message);
     }
   }
 
   await browser.close();
 
-  saveLastSeenIds(lastSeenIds);
+  // 탐색된 전체 기록 파일 저장
+  saveSeenPosts(seenPosts);
 
-  if (totalMatchedPosts.length > 0) {
-    console.log(`\n[알림 발송] 총 ${totalMatchedPosts.length}건의 매칭 매물을 전송합니다.`);
+  if (matchedPosts.length > 0) {
+    console.log(`\n[알림 발송] 총 ${matchedPosts.length}건의 매칭 매물을 전송합니다.`);
 
-    let message = `✨ [바이크셀 필터 매칭 알림] 총 ${totalMatchedPosts.length}건\n━━━━━━━━━━━━━━━━━━\n\n`;
-    totalMatchedPosts.forEach((item, index) => {
+    let message = `✨ [바이크셀 필터 매칭 알림] 총 ${matchedPosts.length}건\n━━━━━━━━━━━━━━━━━━\n\n`;
+    matchedPosts.forEach((item, index) => {
       message += `${index + 1}. [${item.boardName}] ${item.title}\n`;
       if (item.writer) message += `👤 작성자: ${item.writer}\n`;
       message += `🛠️ 매칭 조건: ${item.reason}\n`;
@@ -222,7 +200,7 @@ async function run() {
 
     sendTelegramMessage(message);
   } else {
-    console.log('\n[INFO] 매칭된 신규 매물이 없습니다. 프로세스를 종료합니다.');
+    console.log('\n[INFO] 변동 사항 및 새 글이 없습니다. 프로세스를 종료합니다.');
   }
 }
 
