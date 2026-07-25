@@ -16,22 +16,20 @@ const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN;
 const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID;
 
 const BOARDS = [
-  { name: '산악완성차 중고장터', url: 'https://bikesell.co.kr/SITE/M/list.asp?doltop=MARKET&dolsection=MARKET1', section: 'MARKET1' },
-  { name: '산악프레임 중고장터', url: 'https://bikesell.co.kr/SITE/M/list.asp?doltop=MARKET&dolsection=MARKET2', section: 'MARKET2' },
-  { name: '산악 샥포크 중고장터', url: 'https://bikesell.co.kr/SITE/M/list.asp?doltop=MARKET&dolsection=MARKET3', section: 'MARKET3' },
-  { name: '산악부속 중고장터', url: 'https://bikesell.co.kr/SITE/M/list.asp?doltop=MARKET&dolsection=MARKET4', section: 'MARKET4' },
-  { name: '전기자전거 완성차장터', url: 'https://bikesell.co.kr/SITE/M/list.asp?doltop=MARKET&dolsection=MARKET21', section: 'MARKET21' },
-  { name: '전기자전거 부품장터', url: 'https://bikesell.co.kr/SITE/M/list.asp?doltop=MARKET&dolsection=MARKET24', section: 'MARKET24' },
-  { name: '미니벨로 완성차장터', url: 'https://bikesell.co.kr/SITE/M/list.asp?doltop=MARKET&dolsection=MARKET31', section: 'MARKET31' },
-  { name: '미니벨로 부품장터', url: 'https://bikesell.co.kr/SITE/M/list.asp?doltop=MARKET&dolsection=MARKET34', section: 'MARKET34' }
+  { name: '산악완성차 중고장터', url: 'https://bikesell.co.kr/site/board/list.asp?doltop=MARKET&dolsection=MARKET1', section: 'MARKET1' },
+  { name: '산악프레임 중고장터', url: 'https://bikesell.co.kr/site/board/list.asp?doltop=MARKET&dolsection=MARKET2', section: 'MARKET2' },
+  { name: '산악 샥포크 중고장터', url: 'https://bikesell.co.kr/site/board/list.asp?doltop=MARKET&dolsection=MARKET3', section: 'MARKET3' },
+  { name: '산악부속 중고장터', url: 'https://bikesell.co.kr/site/board/list.asp?doltop=MARKET&dolsection=MARKET4', section: 'MARKET4' },
+  { name: '전기자전거 완성차장터', url: 'https://bikesell.co.kr/site/board/list.asp?doltop=MARKET&dolsection=MARKET21', section: 'MARKET21' },
+  { name: '전기자전거 부품장터', url: 'https://bikesell.co.kr/site/board/list.asp?doltop=MARKET&dolsection=MARKET24', section: 'MARKET24' },
+  { name: '미니벨로 완성차장터', url: 'https://bikesell.co.kr/site/board/list.asp?doltop=MARKET&dolsection=MARKET31', section: 'MARKET31' },
+  { name: '미니벨로 부품장터', url: 'https://bikesell.co.kr/site/board/list.asp?doltop=MARKET&dolsection=MARKET34', section: 'MARKET34' }
 ];
 
-// 게시판별 최신 번호(Max ID) 객체로 저장 및 로드
 function loadLastSeenIds() {
   if (fs.existsSync(SEEN_FILE)) {
     try {
       const data = JSON.parse(fs.readFileSync(SEEN_FILE, 'utf8'));
-      // 기존 배열 방식일 경우 호환성 예외 처리
       if (!Array.isArray(data) && typeof data === 'object') {
         console.log(`[SYSTEM] 게시판별 최신 기록 로드 완료`);
         return data;
@@ -102,7 +100,7 @@ function sendTelegramMessage(text) {
 
 async function run() {
   console.log('====================================================');
-  console.log('[START] 바이크셀 8개 통합 장터 구동 엔진 (Max ID 최적화)');
+  console.log('[START] 바이크셀 8개 통합 장터 구동 엔진 (Max ID & 텍스트 파서)');
   console.log('====================================================');
 
   if (!fs.existsSync(LOGS_DIR)) {
@@ -118,9 +116,8 @@ async function run() {
   try {
     browser = await chromium.launch({ headless: true });
     
-    // HAR 전수 기록 모드 유지
     context = await browser.newContext({
-      userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1',
+      userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
       recordHar: {
         path: HAR_FILE,
         content: 'embed',
@@ -137,47 +134,51 @@ async function run() {
       try {
         await page.goto(board.url, { waitUntil: 'domcontentloaded', timeout: 15000 });
 
-        const posts = await page.evaluate(() => {
-          const results = [];
-          const listItems = Array.from(document.querySelectorAll('#bikesellboard ul li, div#bikesellboard li'));
-
-          listItems.forEach(li => {
-            const aTag = li.querySelector('a[href*="content.asp"]');
-            if (!aTag) return;
-
-            // 판매완료건(<STRIKE>) 제외
-            if (aTag.querySelector('strike, STRIKE')) return;
-
-            const href = aTag.getAttribute('href') || '';
+        const pageData = await page.evaluate(() => {
+          const fullText = document.body.innerText;
+          
+          const linkMap = {};
+          const links = Array.from(document.querySelectorAll('a[href*="content.asp"]'));
+          links.forEach(a => {
+            const href = a.getAttribute('href') || '';
             const match = href.match(/dolseq=(\d+)/i);
-            if (!match) return;
-
-            const id = parseInt(match[1], 10);
-            const title = aTag.innerText.replace(/\s+/g, ' ').trim();
-
-            if (!title) return;
-
-            const writerEl = li.querySelector('a[href*="memo_write.asp"], .writer');
-            const writer = writerEl ? writerEl.innerText.trim() : '';
-
-            results.push({ id, title, writer });
+            const title = a.innerText.trim();
+            if (match && title) {
+              linkMap[title] = match[1];
+            }
           });
 
-          return results;
+          return { fullText, linkMap };
         });
 
-        console.log(` └ [파싱 완료] ${board.name} -> 총 ${posts.length}개 유효 매물 정제 완료`);
+        // 텍스트 기반 매물 추출 및 취소선(판매완료) 배제
+        const regex = /▒\s*([^\n\[]+?)\s*(\[\s*\d+\s*\])\s*(\d+)\s*([a-zA-Z0-9_-]+)\s*(\d{4}-\d{2}-\d{2})/g;
+        const posts = [];
+        let match;
+
+        while ((match = regex.exec(pageData.fullText)) !== null) {
+          const title = match[1].trim();
+          const replyCount = match[2].trim();
+          const writer = match[4].trim();
+          
+          const rawId = pageData.linkMap[title];
+          if (!rawId) continue;
+
+          const id = parseInt(rawId, 10);
+          posts.push({ id, title, replyCount, writer });
+        }
+
+        console.log(` └ [파싱 완료] ${board.name} -> 총 ${posts.length}개 매물 정제 완료`);
 
         const lastSeenId = lastSeenMap[board.section] || 0;
         let maxIdInBoard = lastSeenId;
 
         posts.forEach(post => {
-          // 해당 게시판의 최대 ID값 계속 추적
           if (post.id > maxIdInBoard) {
             maxIdInBoard = post.id;
           }
 
-          // 기존 최신 번호보다 작거나 같으면 이미 처리한 과거 글로 간주하고 스킵
+          // 최신 번호 이하의 과거 매물은 스킵
           if (lastSeenId > 0 && post.id <= lastSeenId) return;
 
           const matchedKeyword = filterConfig.KEYWORDS.find(kw =>
@@ -207,7 +208,7 @@ async function run() {
 
             boardMatches[board.name].push({
               id: post.id,
-              title: post.title,
+              title: `${post.title}${post.replyCount}`,
               writer: post.writer,
               reason: reason,
               isSpecial: isSpecial,
@@ -217,7 +218,6 @@ async function run() {
           }
         });
 
-        // 탐색 완료 후 최신 ID 갱신
         lastSeenMap[board.section] = maxIdInBoard;
 
       } catch (err) {
@@ -225,7 +225,6 @@ async function run() {
       }
     }
 
-    // 최신 번호 맵 파일 저장
     saveLastSeenIds(lastSeenMap);
 
     const boardNames = Object.keys(boardMatches);
