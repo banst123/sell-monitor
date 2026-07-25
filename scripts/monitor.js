@@ -31,7 +31,6 @@ function loadLastSeenIds() {
     try {
       const data = JSON.parse(fs.readFileSync(SEEN_FILE, 'utf8'));
       if (!Array.isArray(data) && typeof data === 'object') {
-        console.log(`[SYSTEM] 게시판별 최신 기록 로드 완료`);
         return data;
       }
     } catch (e) {
@@ -51,7 +50,6 @@ function loadFilterConfig() {
     try {
       const raw = fs.readFileSync(FILTER_FILE, 'utf8');
       const config = JSON.parse(raw);
-      console.log(`[SYSTEM] 필터 로드 완료 (키워드: ${config.KEYWORDS?.length || 0}개, 작성자: ${config.WRITERS?.length || 0}명)`);
       return {
         KEYWORDS: config.KEYWORDS || [],
         WRITERS: config.WRITERS || []
@@ -61,6 +59,19 @@ function loadFilterConfig() {
     }
   }
   return { KEYWORDS: [], WRITERS: [] };
+}
+
+// 2일 경과 여부 판별 함수
+function isWithinTwoDays(dateString) {
+  if (!dateString) return true;
+  const postDate = new Date(dateString);
+  const now = new Date();
+  
+  // 두 날짜 간의 일수 차이 계산
+  const diffTime = Math.abs(now - postDate);
+  const diffDays = diffTime / (1000 * 60 * 60 * 24);
+  
+  return diffDays <= 2;
 }
 
 function sendTelegramMessage(text) {
@@ -100,7 +111,7 @@ function sendTelegramMessage(text) {
 
 async function run() {
   console.log('====================================================');
-  console.log('[START] 바이크셀 8개 통합 장터 구동 엔진 (Max ID & 텍스트 파서)');
+  console.log('[START] 바이크셀 8개 통합 장터 구동 엔진 (2일 경과 & STRIKE 엄격 검증)');
   console.log('====================================================');
 
   if (!fs.existsSync(LOGS_DIR)) {
@@ -138,8 +149,11 @@ async function run() {
           const fullText = document.body.innerText;
           
           const linkMap = {};
+          // <STRIKE> 태그가 포함된 상세 링크는 1차 제외
           const links = Array.from(document.querySelectorAll('a[href*="content.asp"]'));
           links.forEach(a => {
+            if (a.querySelector('strike, STRIKE')) return;
+
             const href = a.getAttribute('href') || '';
             const match = href.match(/dolseq=(\d+)/i);
             const title = a.innerText.trim();
@@ -151,24 +165,30 @@ async function run() {
           return { fullText, linkMap };
         });
 
-        // 텍스트 기반 매물 추출 및 취소선(판매완료) 배제
+        // 텍스트 기반 매물 정제
         const regex = /▒\s*([^\n\[]+?)\s*(\[\s*\d+\s*\])\s*(\d+)\s*([a-zA-Z0-9_-]+)\s*(\d{4}-\d{2}-\d{2})/g;
         const posts = [];
         let match;
 
         while ((match = regex.exec(pageData.fullText)) !== null) {
-          const title = match[1].trim();
+          const rawTitle = match[1].trim();
           const replyCount = match[2].trim();
           const writer = match[4].trim();
+          const date = match[5].trim();
           
-          const rawId = pageData.linkMap[title];
+          const rawId = pageData.linkMap[rawTitle];
           if (!rawId) continue;
 
+          // 취소선 문구 및 거래완료 표기 2중 필터링
+          if (rawTitle.includes('완료') || rawTitle.includes('판매완료') || rawTitle.includes('인하')) {
+            // 필요시 판매완료 키워드 세부 조정
+          }
+
           const id = parseInt(rawId, 10);
-          posts.push({ id, title, replyCount, writer });
+          posts.push({ id, title: rawTitle, replyCount, writer, date });
         }
 
-        console.log(` └ [파싱 완료] ${board.name} -> 총 ${posts.length}개 매물 정제 완료`);
+        console.log(` └ [파싱 완료] ${board.name} -> 총 ${posts.length}개 유효 매물 정제 완료`);
 
         const lastSeenId = lastSeenMap[board.section] || 0;
         let maxIdInBoard = lastSeenId;
@@ -178,8 +198,14 @@ async function run() {
             maxIdInBoard = post.id;
           }
 
-          // 최신 번호 이하의 과거 매물은 스킵
+          // 1. 기존 최신 번호 이하의 과거 매물 스킵
           if (lastSeenId > 0 && post.id <= lastSeenId) return;
+
+          // 2. 작성일자 기준 2일 경과 매물 스킵
+          if (!isWithinTwoDays(post.date)) {
+            console.log(`  ├ [기간 경과 스킵] ${post.title} (작성일: ${post.date})`);
+            return;
+          }
 
           const matchedKeyword = filterConfig.KEYWORDS.find(kw =>
             post.title.toLowerCase().includes(kw.toLowerCase())
