@@ -15,7 +15,6 @@ const HAR_FILE = path.resolve(LOGS_DIR, 'network_full.har');
 const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN;
 const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID;
 
-// 모바일 전용 목록 페이지 경로(/SITE/M/list.asp) 명시
 const BOARDS = [
   { name: '산악완성차 중고장터', url: 'https://bikesell.co.kr/SITE/M/list.asp?doltop=MARKET&dolsection=MARKET1', section: 'MARKET1' },
   { name: '산악프레임 중고장터', url: 'https://bikesell.co.kr/SITE/M/list.asp?doltop=MARKET&dolsection=MARKET2', section: 'MARKET2' },
@@ -27,25 +26,26 @@ const BOARDS = [
   { name: '미니벨로 부품장터', url: 'https://bikesell.co.kr/SITE/M/list.asp?doltop=MARKET&dolsection=MARKET34', section: 'MARKET34' }
 ];
 
-function loadSeenPosts() {
+// 게시판별 최신 번호(Max ID) 객체로 저장 및 로드
+function loadLastSeenIds() {
   if (fs.existsSync(SEEN_FILE)) {
     try {
       const data = JSON.parse(fs.readFileSync(SEEN_FILE, 'utf8'));
-      if (Array.isArray(data)) {
-        console.log(`[SYSTEM] 기존 탐색 기록 ${data.length}개 로드 완료 (${SEEN_FILE})`);
-        return new Set(data);
+      // 기존 배열 방식일 경우 호환성 예외 처리
+      if (!Array.isArray(data) && typeof data === 'object') {
+        console.log(`[SYSTEM] 게시판별 최신 기록 로드 완료`);
+        return data;
       }
     } catch (e) {
       console.error('[WARN] seen_posts.json 읽기 오류. 새로 생성합니다.');
     }
   }
-  return new Set();
+  return {};
 }
 
-function saveSeenPosts(seenSet) {
-  const data = Array.from(seenSet);
-  fs.writeFileSync(SEEN_FILE, JSON.stringify(data, null, 2), 'utf8');
-  console.log(`[SYSTEM] 신규 탐색 기록 저장 완료 (총 ${data.length}개 항목)`);
+function saveLastSeenIds(lastSeenMap) {
+  fs.writeFileSync(SEEN_FILE, JSON.stringify(lastSeenMap, null, 2), 'utf8');
+  console.log(`[SYSTEM] 게시판별 최신 번호 저장 완료`);
 }
 
 function loadFilterConfig() {
@@ -102,14 +102,14 @@ function sendTelegramMessage(text) {
 
 async function run() {
   console.log('====================================================');
-  console.log('[START] 바이크셀 8개 통합 장터 구동 엔진 (완료글/중복 제어 적용)');
+  console.log('[START] 바이크셀 8개 통합 장터 구동 엔진 (Max ID 최적화)');
   console.log('====================================================');
 
   if (!fs.existsSync(LOGS_DIR)) {
     fs.mkdirSync(LOGS_DIR, { recursive: true });
   }
 
-  const seenPosts = loadSeenPosts();
+  const lastSeenMap = loadLastSeenIds();
   const filterConfig = loadFilterConfig();
 
   let browser;
@@ -118,7 +118,7 @@ async function run() {
   try {
     browser = await chromium.launch({ headless: true });
     
-    // 지시하신 HAR 전수 로깅 설정 적용
+    // HAR 전수 기록 모드 유지
     context = await browser.newContext({
       userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1',
       recordHar: {
@@ -137,29 +137,26 @@ async function run() {
       try {
         await page.goto(board.url, { waitUntil: 'domcontentloaded', timeout: 15000 });
 
-        // DOM 파싱: 취소선(<STRIKE>) 필터링 및 매물 추출
         const posts = await page.evaluate(() => {
           const results = [];
           const listItems = Array.from(document.querySelectorAll('#bikesellboard ul li, div#bikesellboard li'));
 
           listItems.forEach(li => {
-            // 상세링크(content.asp) 탐색
             const aTag = li.querySelector('a[href*="content.asp"]');
             if (!aTag) return;
 
-            // 판매완료건(<STRIKE>) 감지 시 제외
+            // 판매완료건(<STRIKE>) 제외
             if (aTag.querySelector('strike, STRIKE')) return;
 
             const href = aTag.getAttribute('href') || '';
             const match = href.match(/dolseq=(\d+)/i);
             if (!match) return;
 
-            const id = match[1];
+            const id = parseInt(match[1], 10);
             const title = aTag.innerText.replace(/\s+/g, ' ').trim();
 
             if (!title) return;
 
-            // 작성자 영역 추출
             const writerEl = li.querySelector('a[href*="memo_write.asp"], .writer');
             const writer = writerEl ? writerEl.innerText.trim() : '';
 
@@ -171,12 +168,17 @@ async function run() {
 
         console.log(` └ [파싱 완료] ${board.name} -> 총 ${posts.length}개 유효 매물 정제 완료`);
 
-        posts.forEach(post => {
-          // 이미 확인한 게시물 스킵
-          if (seenPosts.has(post.id)) return;
+        const lastSeenId = lastSeenMap[board.section] || 0;
+        let maxIdInBoard = lastSeenId;
 
-          // 탐색 내역 등록
-          seenPosts.add(post.id);
+        posts.forEach(post => {
+          // 해당 게시판의 최대 ID값 계속 추적
+          if (post.id > maxIdInBoard) {
+            maxIdInBoard = post.id;
+          }
+
+          // 기존 최신 번호보다 작거나 같으면 이미 처리한 과거 글로 간주하고 스킵
+          if (lastSeenId > 0 && post.id <= lastSeenId) return;
 
           const matchedKeyword = filterConfig.KEYWORDS.find(kw =>
             post.title.toLowerCase().includes(kw.toLowerCase())
@@ -215,13 +217,16 @@ async function run() {
           }
         });
 
+        // 탐색 완료 후 최신 ID 갱신
+        lastSeenMap[board.section] = maxIdInBoard;
+
       } catch (err) {
         console.error(` └ [실패] 연결 오류:`, err.message);
       }
     }
 
-    // 갱신된 탐색 내역 파일 저장
-    saveSeenPosts(seenPosts);
+    // 최신 번호 맵 파일 저장
+    saveLastSeenIds(lastSeenMap);
 
     const boardNames = Object.keys(boardMatches);
     if (boardNames.length > 0) {
