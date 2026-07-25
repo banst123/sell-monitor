@@ -7,7 +7,9 @@ import { fileURLToPath } from 'url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const SEEN_FILE = path.resolve(__dirname, '..', 'seen_posts.json');
+// 환경변수(SEEN_FILE_NAME) 주입 시 해당 파일명 사용 (기본값: seen_posts.json)
+const SEEN_FILE_NAME = process.env.SEEN_FILE_NAME || 'seen_posts.json';
+const SEEN_FILE = path.resolve(__dirname, '..', SEEN_FILE_NAME);
 const FILTER_FILE = path.resolve(__dirname, '..', 'filter_config.json');
 
 const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN;
@@ -32,7 +34,7 @@ function loadLastSeenIds() {
         return data;
       }
     } catch (e) {
-      console.error('[WARN] seen_posts.json 읽기 오류. 새로 생성합니다.');
+      console.error(`[WARN] ${SEEN_FILE_NAME} 읽기 오류. 새로 생성합니다.`);
     }
   }
   return {};
@@ -40,7 +42,7 @@ function loadLastSeenIds() {
 
 function saveLastSeenIds(lastSeenMap) {
   fs.writeFileSync(SEEN_FILE, JSON.stringify(lastSeenMap, null, 2), 'utf8');
-  console.log(`[SYSTEM] 게시판별 최신 번호 저장 완료`);
+  console.log(`[SYSTEM] 게시판별 최신 번호 저장 완료 (${SEEN_FILE_NAME})`);
 }
 
 function loadFilterConfig() {
@@ -48,7 +50,9 @@ function loadFilterConfig() {
     try {
       const raw = fs.readFileSync(FILTER_FILE, 'utf8');
       const config = JSON.parse(raw);
+      console.log(`[SYSTEM] 필터 모드 가동 (키워드: ${config.KEYWORDS?.length || 0}개, 작성자: ${config.WRITERS?.length || 0}명)`);
       return {
+        isFilterMode: true,
         KEYWORDS: config.KEYWORDS || [],
         WRITERS: config.WRITERS || []
       };
@@ -56,7 +60,8 @@ function loadFilterConfig() {
       console.error('[ERROR] filter_config.json 읽기 오류:', e.message);
     }
   }
-  return { KEYWORDS: [], WRITERS: [] };
+  console.log('[SYSTEM] 무필터(전체 매물 수집) 모드 가동');
+  return { isFilterMode: false, KEYWORDS: [], WRITERS: [] };
 }
 
 function isWithinTwoDays(dateString) {
@@ -105,7 +110,7 @@ function sendTelegramMessage(text) {
 
 async function run() {
   console.log('====================================================');
-  console.log('[START] 바이크셀 8개 통합 장터 구동 엔진 (콘솔 전수 로깅 모드)');
+  console.log(`[START] 바이크셀 8개 통합 장터 구동 엔진 (${SEEN_FILE_NAME})`);
   console.log('====================================================');
 
   const lastSeenMap = loadLastSeenIds();
@@ -134,8 +139,9 @@ async function run() {
 
         const pageData = await page.evaluate(() => {
           const fullText = document.body.innerText;
-          
           const linkMap = {};
+          
+          // <STRIKE> 태그가 포함된 취소선(거래완료) 항목 제외
           const links = Array.from(document.querySelectorAll('a[href*="content.asp"]'));
           links.forEach(a => {
             if (a.querySelector('strike, STRIKE')) return;
@@ -154,10 +160,6 @@ async function run() {
         console.log(` ├ [Raw Text Length] ${pageData.fullText.length} 자`);
         console.log(` ├ [Valid DOM Links] ${Object.keys(pageData.linkMap).length} 개 식별`);
 
-        // 수집된 원문 콘솔 실시간 로깅
-        console.log(` ├ [Captured Text Log]`);
-        console.log(pageData.fullText.substring(0, 300).replace(/\n+/g, ' | ') + '...');
-
         const regex = /▒\s*([^\n\[]+?)\s*(\[\s*\d+\s*\])\s*(\d+)\s*([a-zA-Z0-9_-]+)\s*(\d{4}-\d{2}-\d{2})/g;
         const posts = [];
         let match;
@@ -175,7 +177,7 @@ async function run() {
           posts.push({ id, title: rawTitle, replyCount, writer, date });
         }
 
-        console.log(` └ [파싱 정제] 총 ${posts.length}개 유효 매물 정제 완료`);
+        console.log(` └ [파싱 정제] 총 ${posts.length}개 유효 매물 감지`);
 
         const lastSeenId = lastSeenMap[board.section] || 0;
         let maxIdInBoard = lastSeenId;
@@ -185,33 +187,40 @@ async function run() {
             maxIdInBoard = post.id;
           }
 
+          // 1. 기존 최신 번호 이하의 과거 매물 스킵
           if (lastSeenId > 0 && post.id <= lastSeenId) return;
 
-          if (!isWithinTwoDays(post.date)) {
-            console.log(`  ├ [기간 경과 스킵] ${post.title} (${post.date})`);
-            return;
-          }
+          // 2. 작성일자 기준 2일 경과 매물 스킵
+          if (!isWithinTwoDays(post.date)) return;
 
-          const matchedKeyword = filterConfig.KEYWORDS.find(kw =>
-            post.title.toLowerCase().includes(kw.toLowerCase())
-          );
-          const matchedWriter = filterConfig.WRITERS.find(wr =>
-            wr && post.writer.toLowerCase().includes(wr.toLowerCase())
-          );
+          let isMatch = false;
+          let reason = '정기 스캔';
+          let isSpecial = false;
 
-          if (matchedKeyword || matchedWriter) {
-            if (!boardMatches[board.name]) {
-              boardMatches[board.name] = [];
-            }
-
-            let reason = '';
-            let isSpecial = false;
+          if (filterConfig.isFilterMode) {
+            const matchedKeyword = filterConfig.KEYWORDS.find(kw =>
+              post.title.toLowerCase().includes(kw.toLowerCase())
+            );
+            const matchedWriter = filterConfig.WRITERS.find(wr =>
+              wr && post.writer.toLowerCase().includes(wr.toLowerCase())
+            );
 
             if (matchedWriter) {
               reason = `지정게시자 [${matchedWriter}]`;
               isSpecial = true;
+              isMatch = true;
             } else if (matchedKeyword) {
               reason = `키워드 [${matchedKeyword}]`;
+              isMatch = true;
+            }
+          } else {
+            // 무필터(전체 수집) 모드
+            isMatch = true;
+          }
+
+          if (isMatch) {
+            if (!boardMatches[board.name]) {
+              boardMatches[board.name] = [];
             }
 
             const mobileUrl = `https://bikesell.co.kr/SITE/M/content.asp?doltop=MARKET&dolsection=${board.section}&dolseq=${post.id}`;
@@ -244,9 +253,14 @@ async function run() {
         const items = boardMatches[boardName];
         
         const hasSpecialInBoard = items.some(item => item.isSpecial);
-        const headerPrefix = hasSpecialInBoard ? '🚨🚨 ' : '';
+        
+        // 필터 모드 시 특이게시자 존재 시에만 🚨🚨 추가
+        const headerIcon = filterConfig.isFilterMode 
+          ? (hasSpecialInBoard ? '🚨🚨 ' : '')
+          : '📦 ';
+        const headerTitle = filterConfig.isFilterMode ? '✨ 필터 매칭 결과' : '🕒 정기검색 결과';
 
-        let message = `${headerPrefix}[${boardName}] ✨ 필터 매칭 결과 (총 ${items.length}건)\n━━━━━━━━━━━━━━━━━━\n`;
+        let message = `${headerIcon}[${boardName}] ${headerTitle} (총 ${items.length}건)\n━━━━━━━━━━━━━━━━━━\n`;
         
         items.forEach((item, index) => {
           const specialBadge = item.isSpecial ? ' 🚨[특이게시자]' : '';
