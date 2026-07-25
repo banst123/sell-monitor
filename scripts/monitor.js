@@ -9,11 +9,12 @@ const __dirname = path.dirname(__filename);
 
 const SEEN_FILE = path.resolve(__dirname, '..', 'seen_posts.json');
 const FILTER_FILE = path.resolve(__dirname, '..', 'filter_config.json');
+const HAR_DIR = path.resolve(__dirname, '..', 'logs');
+const HAR_FILE = path.resolve(HAR_DIR, 'network.har');
 
 const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN;
 const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID;
 
-// 데스크톱 목록 페이지 경로 및 모바일 상세링크 세션 코드 매핑
 const BOARDS = [
   { name: '산악완성차 중고장터', url: 'https://bikesell.co.kr/site/board/list.asp?doltop=MARKET&dolsection=MARKET1', section: 'MARKET1' },
   { name: '산악프레임 중고장터', url: 'https://bikesell.co.kr/site/board/list.asp?doltop=MARKET&dolsection=MARKET2', section: 'MARKET2' },
@@ -93,15 +94,22 @@ function sendTelegramMessage(text) {
 
 async function run() {
   console.log('====================================================');
-  console.log('[START] 바이크셀 8개 통합 장터 구동 엔진 (텍스트 파서)');
+  console.log('[START] 바이크셀 8개 통합 장터 구동 엔진 (HAR 로깅 모드)');
   console.log('====================================================');
+
+  if (!fs.existsSync(HAR_DIR)) {
+    fs.mkdirSync(HAR_DIR, { recursive: true });
+  }
 
   const seenPosts = loadSeenPosts();
   const filterConfig = loadFilterConfig();
 
   const browser = await chromium.launch({ headless: true });
+  
+  // HAR 기록이 활성화된 브라우저 컨텍스트
   const context = await browser.newContext({
-    userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+    userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    recordHar: { path: HAR_FILE }
   });
   const page = await context.newPage();
 
@@ -109,15 +117,16 @@ async function run() {
 
   for (const board of BOARDS) {
     console.log(`\n[진입] ${board.name} 데이터 수집 중...`);
+    console.log(` ├ [요청 URL] ${board.url}`);
 
     try {
-      await page.goto(board.url, { waitUntil: 'domcontentloaded', timeout: 30000 });
+      const response = await page.goto(board.url, { waitUntil: 'domcontentloaded', timeout: 30000 });
+      console.log(` ├ [응답 코드] ${response ? response.status() : 'NO_RESPONSE'}`);
 
-      // 1. 페이지 전체 텍스트 및 dolseq 링크 매핑 데이터 수집
+      // DOM 및 텍스트 덤프 데이터 수집
       const pageData = await page.evaluate(() => {
         const fullText = document.body.innerText;
         
-        // 링크 태그에서 dolseq 추출하여 매핑 테이블 작성
         const linkMap = {};
         const links = Array.from(document.querySelectorAll('a[href*="content.asp"]'));
         links.forEach(a => {
@@ -129,29 +138,51 @@ async function run() {
           }
         });
 
-        return { fullText, linkMap };
+        // DOM 직접 탐색 파싱 (폴백용)
+        const domPosts = [];
+        const rows = Array.from(document.querySelectorAll('tr'));
+        rows.forEach(tr => {
+          const titleEl = tr.querySelector('div.mtitle a');
+          if (!titleEl) return;
+          const href = titleEl.getAttribute('href') || '';
+          const match = href.match(/dolseq=(\d+)/i);
+          if (!match) return;
+          const id = match[1];
+          const title = titleEl.innerText.replace(/\s+/g, ' ').trim();
+          const writerEl = tr.querySelector('a[href*="memo_write.asp"]');
+          const writer = writerEl ? writerEl.innerText.trim() : '';
+          if (title) domPosts.push({ id, title, writer });
+        });
+
+        return { fullText, linkMap, domPosts };
       });
 
-      // 2. 제시해주신 텍스트 패턴 정규식 파싱
-      // ▒제목[댓글수]\n조회수작성자\n날짜 형태 추출
-      const regex = /▒([^\n\[]+)\[\s*\d+\s*\]\s*\n\s*\d+([a-zA-Z0-9_-]+)\s*\n\s*(\d{4}-\d{2}-\d{2})/g;
-      const posts = [];
+      console.log(` ├ [텍스트 길이] ${pageData.fullText.length} 자`);
+      console.log(` ├ [링크 매핑] ${Object.keys(pageData.linkMap).length} 개 항목 감지`);
+
+      // 1. 텍스트 정규식 파싱 시도
+      const regex = /▒\s*([^\n\[]+?)\s*\[\s*\d+\s*\]\s*(\d+)\s*([a-zA-Z0-9_-]+)\s*(\d{4}-\d{2}-\d{2})/g;
+      let posts = [];
       let match;
 
       while ((match = regex.exec(pageData.fullText)) !== null) {
         const title = match[1].trim();
-        const writer = match[2].trim();
-        const date = match[3].trim();
-        
-        // 매핑된 링크에서 게시글 ID(dolseq) 식별, 없으면 제목 고유값으로 대체
+        const writer = match[3].trim();
+        const date = match[4].trim();
         const id = pageData.linkMap[title] || `${board.section}_${title}`;
-
         posts.push({ id, title, writer, date });
       }
 
-      console.log(`└ [파싱 완료] ${board.name} -> 총 ${posts.length}개 매물 정제 완료`);
+      console.log(` ├ [1차 텍스트 파싱] ${posts.length}개 매물 정제`);
 
-      // 3. 필터링 및 전송 데이터 가공
+      // 2. 텍스트 파싱 실패 시 DOM 파서로 자동 폴백
+      if (posts.length === 0 && pageData.domPosts.length > 0) {
+        console.log(` ├ [2차 DOM 파서 작동] ${pageData.domPosts.length}개 매물 정제`);
+        posts = pageData.domPosts;
+      }
+
+      console.log(` └ [최종 수집 완료] ${board.name} -> 총 ${posts.length}개 매물 정제 완료`);
+
       posts.forEach(post => {
         if (seenPosts.has(post.id)) return;
 
@@ -170,7 +201,6 @@ async function run() {
             matchedWriter ? `작성자 [${matchedWriter}]` : ''
           ].filter(Boolean).join(' / ');
 
-          // 모바일 접속 가능 링크 구성
           const postUrl = post.id.includes('_')
             ? board.url 
             : `https://bikesell.co.kr/SITE/M/content.asp?doltop=MARKET&dolsection=${board.section}&dolseq=${post.id}`;
@@ -187,11 +217,15 @@ async function run() {
       });
 
     } catch (err) {
-      console.error(`└ [실패] 연결 오류:`, err.message);
+      console.error(` └ [실패] 연결 및 파싱 오류:`, err.message);
     }
   }
 
+  // 컨텍스트 종료 시 HAR 기록 완결 저장
+  await context.close();
   await browser.close();
+
+  console.log(`\n[SYSTEM] HAR 트래픽 로그 저장 완료: ${HAR_FILE}`);
 
   saveSeenPosts(seenPosts);
 
