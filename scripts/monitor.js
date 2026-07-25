@@ -9,8 +9,6 @@ const __dirname = path.dirname(__filename);
 
 const SEEN_FILE = path.resolve(__dirname, '..', 'seen_posts.json');
 const FILTER_FILE = path.resolve(__dirname, '..', 'filter_config.json');
-const LOGS_DIR = path.resolve(__dirname, '..', 'logs');
-const HAR_FILE = path.resolve(LOGS_DIR, 'network_full.har');
 
 const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN;
 const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID;
@@ -61,16 +59,12 @@ function loadFilterConfig() {
   return { KEYWORDS: [], WRITERS: [] };
 }
 
-// 2일 경과 여부 판별 함수
 function isWithinTwoDays(dateString) {
   if (!dateString) return true;
   const postDate = new Date(dateString);
   const now = new Date();
-  
-  // 두 날짜 간의 일수 차이 계산
   const diffTime = Math.abs(now - postDate);
   const diffDays = diffTime / (1000 * 60 * 60 * 24);
-  
   return diffDays <= 2;
 }
 
@@ -111,45 +105,37 @@ function sendTelegramMessage(text) {
 
 async function run() {
   console.log('====================================================');
-  console.log('[START] 바이크셀 8개 통합 장터 구동 엔진 (2일 경과 & STRIKE 엄격 검증)');
+  console.log('[START] 바이크셀 8개 통합 장터 구동 엔진 (콘솔 전수 로깅 모드)');
   console.log('====================================================');
-
-  if (!fs.existsSync(LOGS_DIR)) {
-    fs.mkdirSync(LOGS_DIR, { recursive: true });
-  }
 
   const lastSeenMap = loadLastSeenIds();
   const filterConfig = loadFilterConfig();
 
   let browser;
-  let context;
 
   try {
     browser = await chromium.launch({ headless: true });
-    
-    context = await browser.newContext({
-      userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-      recordHar: {
-        path: HAR_FILE,
-        content: 'embed',
-        mode: 'full'
-      }
+    const context = await browser.newContext({
+      userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
     });
 
     const page = await context.newPage();
     const boardMatches = {};
 
     for (const board of BOARDS) {
-      console.log(`\n[진입] ${board.name} 데이터 수집 중...`);
+      console.log(`\n----------------------------------------------------`);
+      console.log(`[진입] ${board.name}`);
+      console.log(` ├ [Target URL] ${board.url}`);
 
       try {
-        await page.goto(board.url, { waitUntil: 'domcontentloaded', timeout: 15000 });
+        const response = await page.goto(board.url, { waitUntil: 'domcontentloaded', timeout: 15000 });
+        const status = response ? response.status() : 'N/A';
+        console.log(` ├ [HTTP Response Status] ${status}`);
 
         const pageData = await page.evaluate(() => {
           const fullText = document.body.innerText;
           
           const linkMap = {};
-          // <STRIKE> 태그가 포함된 상세 링크는 1차 제외
           const links = Array.from(document.querySelectorAll('a[href*="content.asp"]'));
           links.forEach(a => {
             if (a.querySelector('strike, STRIKE')) return;
@@ -165,7 +151,13 @@ async function run() {
           return { fullText, linkMap };
         });
 
-        // 텍스트 기반 매물 정제
+        console.log(` ├ [Raw Text Length] ${pageData.fullText.length} 자`);
+        console.log(` ├ [Valid DOM Links] ${Object.keys(pageData.linkMap).length} 개 식별`);
+
+        // 수집된 원문 콘솔 실시간 로깅
+        console.log(` ├ [Captured Text Log]`);
+        console.log(pageData.fullText.substring(0, 300).replace(/\n+/g, ' | ') + '...');
+
         const regex = /▒\s*([^\n\[]+?)\s*(\[\s*\d+\s*\])\s*(\d+)\s*([a-zA-Z0-9_-]+)\s*(\d{4}-\d{2}-\d{2})/g;
         const posts = [];
         let match;
@@ -179,16 +171,11 @@ async function run() {
           const rawId = pageData.linkMap[rawTitle];
           if (!rawId) continue;
 
-          // 취소선 문구 및 거래완료 표기 2중 필터링
-          if (rawTitle.includes('완료') || rawTitle.includes('판매완료') || rawTitle.includes('인하')) {
-            // 필요시 판매완료 키워드 세부 조정
-          }
-
           const id = parseInt(rawId, 10);
           posts.push({ id, title: rawTitle, replyCount, writer, date });
         }
 
-        console.log(` └ [파싱 완료] ${board.name} -> 총 ${posts.length}개 유효 매물 정제 완료`);
+        console.log(` └ [파싱 정제] 총 ${posts.length}개 유효 매물 정제 완료`);
 
         const lastSeenId = lastSeenMap[board.section] || 0;
         let maxIdInBoard = lastSeenId;
@@ -198,12 +185,10 @@ async function run() {
             maxIdInBoard = post.id;
           }
 
-          // 1. 기존 최신 번호 이하의 과거 매물 스킵
           if (lastSeenId > 0 && post.id <= lastSeenId) return;
 
-          // 2. 작성일자 기준 2일 경과 매물 스킵
           if (!isWithinTwoDays(post.date)) {
-            console.log(`  ├ [기간 경과 스킵] ${post.title} (작성일: ${post.date})`);
+            console.log(`  ├ [기간 경과 스킵] ${post.title} (${post.date})`);
             return;
           }
 
@@ -282,10 +267,8 @@ async function run() {
   } catch (globalErr) {
     console.error('[CRITICAL] 예외 발생:', globalErr.message);
   } finally {
-    if (context) await context.close();
     if (browser) await browser.close();
-    console.log(`[SYSTEM] HAR 트래픽 로깅 완료 (${HAR_FILE})`);
-    console.log('[SYSTEM] 프로세스를 종료합니다.');
+    console.log('[SYSTEM] 프로세스를 정상 종료합니다.');
     process.exit(0);
   }
 }
