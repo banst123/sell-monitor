@@ -9,9 +9,14 @@ permissions:
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   monitor:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
 
     steps:
       - name: Checkout
@@ -24,7 +29,10 @@ jobs:
         with:
           node-version: 24
 
-      # ⚡ Playwright 브라우저 캐시 설정
+      - name: Install dependencies
+        run: npm install
+
+      # Playwright 브라우저 캐시 확인 및 복원
       - name: Cache Playwright Browsers
         id: cache-playwright
         uses: actions/cache@v4.2.0
@@ -32,12 +40,8 @@ jobs:
           path: ~/.cache/ms-playwright
           key: ${{ runner.os }}-playwright-${{ hashFiles('package-lock.json') }}
 
-      # ⚡ 요청하신 npm install 구문 구동
-      - name: Install dependencies
-        run: npm install
-
-      # ⚡ 캐시 미스(Cache Miss) 발생 시에만 설치 진행
-      - name: Install Playwright Browsers
+      # 캐시가 존재하지 않을 때만 브라우저 및 시스템 의존성 설치
+      - name: Install Playwright Browsers & System Deps
         if: steps.cache-playwright.outputs.cache-hit != 'true'
         run: npx playwright install --with-deps chromium
 
