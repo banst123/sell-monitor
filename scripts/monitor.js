@@ -9,8 +9,6 @@ const __dirname = path.dirname(__filename);
 
 const SEEN_FILE = path.resolve(__dirname, '..', 'seen_posts.json');
 const FILTER_FILE = path.resolve(__dirname, '..', 'filter_config.json');
-const HAR_DIR = path.resolve(__dirname, '..', 'logs');
-const HAR_FILE = path.resolve(HAR_DIR, 'network.har');
 
 const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN;
 const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID;
@@ -73,6 +71,7 @@ function sendTelegramMessage(text) {
   const payload = JSON.stringify({
     chat_id: TELEGRAM_CHAT_ID,
     text: text,
+    parse_mode: 'Markdown',
     disable_web_page_preview: true
   });
 
@@ -94,36 +93,27 @@ function sendTelegramMessage(text) {
 
 async function run() {
   console.log('====================================================');
-  console.log('[START] 바이크셀 8개 통합 장터 구동 엔진 (HAR 로깅 모드)');
+  console.log('[START] 바이크셀 8개 통합 장터 구동 엔진');
   console.log('====================================================');
-
-  if (!fs.existsSync(HAR_DIR)) {
-    fs.mkdirSync(HAR_DIR, { recursive: true });
-  }
 
   const seenPosts = loadSeenPosts();
   const filterConfig = loadFilterConfig();
 
   const browser = await chromium.launch({ headless: true });
-  
-  // HAR 기록이 활성화된 브라우저 컨텍스트
   const context = await browser.newContext({
-    userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-    recordHar: { path: HAR_FILE }
+    userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
   });
   const page = await context.newPage();
 
-  let matchedPosts = [];
+  // 게시판별 매칭 매물 그룹화 객체
+  const boardMatches = {};
 
   for (const board of BOARDS) {
     console.log(`\n[진입] ${board.name} 데이터 수집 중...`);
-    console.log(` ├ [요청 URL] ${board.url}`);
 
     try {
-      const response = await page.goto(board.url, { waitUntil: 'domcontentloaded', timeout: 30000 });
-      console.log(` ├ [응답 코드] ${response ? response.status() : 'NO_RESPONSE'}`);
+      await page.goto(board.url, { waitUntil: 'domcontentloaded', timeout: 30000 });
 
-      // DOM 및 텍스트 덤프 데이터 수집
       const pageData = await page.evaluate(() => {
         const fullText = document.body.innerText;
         
@@ -138,50 +128,25 @@ async function run() {
           }
         });
 
-        // DOM 직접 탐색 파싱 (폴백용)
-        const domPosts = [];
-        const rows = Array.from(document.querySelectorAll('tr'));
-        rows.forEach(tr => {
-          const titleEl = tr.querySelector('div.mtitle a');
-          if (!titleEl) return;
-          const href = titleEl.getAttribute('href') || '';
-          const match = href.match(/dolseq=(\d+)/i);
-          if (!match) return;
-          const id = match[1];
-          const title = titleEl.innerText.replace(/\s+/g, ' ').trim();
-          const writerEl = tr.querySelector('a[href*="memo_write.asp"]');
-          const writer = writerEl ? writerEl.innerText.trim() : '';
-          if (title) domPosts.push({ id, title, writer });
-        });
-
-        return { fullText, linkMap, domPosts };
+        return { fullText, linkMap };
       });
 
-      console.log(` ├ [텍스트 길이] ${pageData.fullText.length} 자`);
-      console.log(` ├ [링크 매핑] ${Object.keys(pageData.linkMap).length} 개 항목 감지`);
-
-      // 1. 텍스트 정규식 파싱 시도
-      const regex = /▒\s*([^\n\[]+?)\s*\[\s*\d+\s*\]\s*(\d+)\s*([a-zA-Z0-9_-]+)\s*(\d{4}-\d{2}-\d{2})/g;
-      let posts = [];
+      const regex = /▒\s*([^\n\[]+?)\s*(\[\s*\d+\s*\])\s*(\d+)\s*([a-zA-Z0-9_-]+)\s*(\d{4}-\d{2}-\d{2})/g;
+      const posts = [];
       let match;
 
       while ((match = regex.exec(pageData.fullText)) !== null) {
         const title = match[1].trim();
-        const writer = match[3].trim();
-        const date = match[4].trim();
+        const replyCount = match[2].trim();
+        const writer = match[4].trim();
+        const date = match[5].trim();
+        
         const id = pageData.linkMap[title] || `${board.section}_${title}`;
-        posts.push({ id, title, writer, date });
+
+        posts.push({ id, title, replyCount, writer, date });
       }
 
-      console.log(` ├ [1차 텍스트 파싱] ${posts.length}개 매물 정제`);
-
-      // 2. 텍스트 파싱 실패 시 DOM 파서로 자동 폴백
-      if (posts.length === 0 && pageData.domPosts.length > 0) {
-        console.log(` ├ [2차 DOM 파서 작동] ${pageData.domPosts.length}개 매물 정제`);
-        posts = pageData.domPosts;
-      }
-
-      console.log(` └ [최종 수집 완료] ${board.name} -> 총 ${posts.length}개 매물 정제 완료`);
+      console.log(`└ [파싱 완료] ${board.name} -> 총 ${posts.length}개 매물 정제 완료`);
 
       posts.forEach(post => {
         if (seenPosts.has(post.id)) return;
@@ -196,52 +161,64 @@ async function run() {
         );
 
         if (matchedKeyword || matchedWriter) {
-          const matchReason = [
-            matchedKeyword ? `키워드 [${matchedKeyword}]` : '',
-            matchedWriter ? `작성자 [${matchedWriter}]` : ''
-          ].filter(Boolean).join(' / ');
+          if (!boardMatches[board.name]) {
+            boardMatches[board.name] = [];
+          }
 
-          const postUrl = post.id.includes('_')
-            ? board.url 
-            : `https://bikesell.co.kr/SITE/M/content.asp?doltop=MARKET&dolsection=${board.section}&dolseq=${post.id}`;
+          let reason = '';
+          let isSpecial = false;
 
-          matchedPosts.push({
-            boardName: board.name,
+          if (matchedWriter) {
+            reason = `지정게시자 [${matchedWriter}]`;
+            isSpecial = true;
+          } else if (matchedKeyword) {
+            reason = `키워드 [${matchedKeyword}]`;
+          }
+
+          const mobileUrl = `https://bikesell.co.kr/SITE/M/content.asp?doltop=MARKET&dolsection=${board.section}&dolseq=${post.id}`;
+          const pcUrl = `https://bikesell.co.kr/site/board/content.asp?doltop=MARKET&dolsection=${board.section}&dolseq=${post.id}`;
+
+          boardMatches[board.name].push({
             id: post.id,
-            title: post.title,
+            title: `${post.title}${post.replyCount}`,
             writer: post.writer,
-            reason: matchReason,
-            url: postUrl
+            reason: reason,
+            isSpecial: isSpecial,
+            mobileUrl: mobileUrl,
+            pcUrl: pcUrl
           });
         }
       });
 
     } catch (err) {
-      console.error(` └ [실패] 연결 및 파싱 오류:`, err.message);
+      console.error(`└ [실패] 연결 오류:`, err.message);
     }
   }
 
-  // 컨텍스트 종료 시 HAR 기록 완결 저장
-  await context.close();
   await browser.close();
-
-  console.log(`\n[SYSTEM] HAR 트래픽 로그 저장 완료: ${HAR_FILE}`);
 
   saveSeenPosts(seenPosts);
 
-  if (matchedPosts.length > 0) {
-    console.log(`\n[알림 발송] 총 ${matchedPosts.length}건의 매칭 매물을 전송합니다.`);
+  // 게시판별로 양식에 맞추어 알림 발송
+  const boardNames = Object.keys(boardMatches);
+  if (boardNames.length > 0) {
+    boardNames.forEach(boardName => {
+      const items = boardMatches[boardName];
+      
+      let message = `🚨🚨 [${boardName}] ✨ 필터 매칭 결과 (총 ${items.length}건)\n━━━━━━━━━━━━━━━━━━\n`;
+      
+      items.forEach((item, index) => {
+        const specialBadge = item.isSpecial ? ' 🚨[특이게시자]' : '';
+        message += `${index + 1}. ${item.title}${specialBadge}\n`;
+        message += `👤 작성자: ${item.writer}\n`;
+        message += `🛠️ 참고: ${item.reason}\n`;
+        message += `🔗 링크: [📱모바일](${item.mobileUrl}) / [💻PC](${item.pcUrl})\n\n`;
+      });
 
-    let message = `✨ [바이크셀 필터 매칭 알림] 총 ${matchedPosts.length}건\n━━━━━━━━━━━━━━━━━━\n\n`;
-    matchedPosts.forEach((item, index) => {
-      message += `${index + 1}. [${item.boardName}] ${item.title}\n`;
-      if (item.writer) message += `👤 작성자: ${item.writer}\n`;
-      message += `🛠️ 매칭 조건: ${item.reason}\n`;
-      message += `🔗 링크: ${item.url}\n\n`;
+      message += `━━━━━━━━━━━━━━━━━━`;
+
+      sendTelegramMessage(message);
     });
-    message += `━━━━━━━━━━━━━━━━━━`;
-
-    sendTelegramMessage(message);
   } else {
     console.log('\n[INFO] 변동 사항 및 새 글이 없습니다. 프로세스를 종료합니다.');
   }
