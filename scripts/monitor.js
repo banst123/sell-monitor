@@ -7,8 +7,9 @@ import { fileURLToPath } from 'url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// 환경변수(SEEN_FILE_NAME) 주입 시 해당 파일명 사용 (기본값: seen_posts.json)
 const SEEN_FILE_NAME = process.env.SEEN_FILE_NAME || 'seen_posts.json';
+const RUN_MODE = process.env.RUN_MODE || 'FILTER'; // RUN_MODE 환경변수 수용
+
 const SEEN_FILE = path.resolve(__dirname, '..', SEEN_FILE_NAME);
 const FILTER_FILE = path.resolve(__dirname, '..', 'filter_config.json');
 
@@ -46,6 +47,11 @@ function saveLastSeenIds(lastSeenMap) {
 }
 
 function loadFilterConfig() {
+  if (RUN_MODE === 'ALL') {
+    console.log('[SYSTEM] 무필터(전체 매물 수집) 모드 가동');
+    return { isFilterMode: false, KEYWORDS: [], WRITERS: [] };
+  }
+
   if (fs.existsSync(FILTER_FILE)) {
     try {
       const raw = fs.readFileSync(FILTER_FILE, 'utf8');
@@ -60,7 +66,8 @@ function loadFilterConfig() {
       console.error('[ERROR] filter_config.json 읽기 오류:', e.message);
     }
   }
-  console.log('[SYSTEM] 무필터(전체 매물 수집) 모드 가동');
+
+  console.log('[WARN] filter_config.json 부재로 무필터 모드로 전환');
   return { isFilterMode: false, KEYWORDS: [], WRITERS: [] };
 }
 
@@ -110,7 +117,7 @@ function sendTelegramMessage(text) {
 
 async function run() {
   console.log('====================================================');
-  console.log(`[START] 바이크셀 8개 통합 장터 구동 엔진 (${SEEN_FILE_NAME})`);
+  console.log(`[START] 바이크셀 8개 통합 장터 구동 엔진 (${SEEN_FILE_NAME} / ${RUN_MODE})`);
   console.log('====================================================');
 
   const lastSeenMap = loadLastSeenIds();
@@ -130,18 +137,14 @@ async function run() {
     for (const board of BOARDS) {
       console.log(`\n----------------------------------------------------`);
       console.log(`[진입] ${board.name}`);
-      console.log(` ├ [Target URL] ${board.url}`);
 
       try {
         const response = await page.goto(board.url, { waitUntil: 'domcontentloaded', timeout: 15000 });
-        const status = response ? response.status() : 'N/A';
-        console.log(` ├ [HTTP Response Status] ${status}`);
 
         const pageData = await page.evaluate(() => {
           const fullText = document.body.innerText;
           const linkMap = {};
           
-          // <STRIKE> 태그가 포함된 취소선(거래완료) 항목 제외
           const links = Array.from(document.querySelectorAll('a[href*="content.asp"]'));
           links.forEach(a => {
             if (a.querySelector('strike, STRIKE')) return;
@@ -156,9 +159,6 @@ async function run() {
 
           return { fullText, linkMap };
         });
-
-        console.log(` ├ [Raw Text Length] ${pageData.fullText.length} 자`);
-        console.log(` ├ [Valid DOM Links] ${Object.keys(pageData.linkMap).length} 개 식별`);
 
         const regex = /▒\s*([^\n\[]+?)\s*(\[\s*\d+\s*\])\s*(\d+)\s*([a-zA-Z0-9_-]+)\s*(\d{4}-\d{2}-\d{2})/g;
         const posts = [];
@@ -187,10 +187,8 @@ async function run() {
             maxIdInBoard = post.id;
           }
 
-          // 1. 기존 최신 번호 이하의 과거 매물 스킵
           if (lastSeenId > 0 && post.id <= lastSeenId) return;
 
-          // 2. 작성일자 기준 2일 경과 매물 스킵
           if (!isWithinTwoDays(post.date)) return;
 
           let isMatch = false;
@@ -214,7 +212,6 @@ async function run() {
               isMatch = true;
             }
           } else {
-            // 무필터(전체 수집) 모드
             isMatch = true;
           }
 
@@ -253,8 +250,6 @@ async function run() {
         const items = boardMatches[boardName];
         
         const hasSpecialInBoard = items.some(item => item.isSpecial);
-        
-        // 필터 모드 시 특이게시자 존재 시에만 🚨🚨 추가
         const headerIcon = filterConfig.isFilterMode 
           ? (hasSpecialInBoard ? '🚨🚨 ' : '')
           : '📦 ';
