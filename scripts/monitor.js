@@ -13,18 +13,18 @@ const FILTER_FILE = path.resolve(__dirname, '..', 'filter_config.json');
 const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN;
 const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID;
 
+// 데스크톱 목록 페이지 경로 및 모바일 상세링크 세션 코드 매핑
 const BOARDS = [
-  { name: '산악완성차 중고장터', url: 'http://www.bikesell.co.kr/m/m_board.asp?board=sub01' },
-  { name: '산악프레임 중고장터', url: 'http://www.bikesell.co.kr/m/m_board.asp?board=sub02' },
-  { name: '산악 샥포크 중고장터', url: 'http://www.bikesell.co.kr/m/m_board.asp?board=sub03' },
-  { name: '산악부속 중고장터', url: 'http://www.bikesell.co.kr/m/m_board.asp?board=sub04' },
-  { name: '전기자전거 부품장터', url: 'http://www.bikesell.co.kr/m/m_board.asp?board=pas02' },
-  { name: '전기자전거 완성차장터', url: 'http://www.bikesell.co.kr/m/m_board.asp?board=pas01' },
-  { name: '미니벨로 완성차장터', url: 'http://www.bikesell.co.kr/m/m_board.asp?board=sub08' },
-  { name: '미니벨로 부품장터', url: 'http://www.bikesell.co.kr/m/m_board.asp?board=sub09' }
+  { name: '산악완성차 중고장터', url: 'https://bikesell.co.kr/site/board/list.asp?doltop=MARKET&dolsection=MARKET1', section: 'MARKET1' },
+  { name: '산악프레임 중고장터', url: 'https://bikesell.co.kr/site/board/list.asp?doltop=MARKET&dolsection=MARKET2', section: 'MARKET2' },
+  { name: '산악 샥포크 중고장터', url: 'https://bikesell.co.kr/site/board/list.asp?doltop=MARKET&dolsection=MARKET3', section: 'MARKET3' },
+  { name: '산악부속 중고장터', url: 'https://bikesell.co.kr/site/board/list.asp?doltop=MARKET&dolsection=MARKET4', section: 'MARKET4' },
+  { name: '전기자전거 완성차장터', url: 'https://bikesell.co.kr/site/board/list.asp?doltop=MARKET&dolsection=MARKET21', section: 'MARKET21' },
+  { name: '전기자전거 부품장터', url: 'https://bikesell.co.kr/site/board/list.asp?doltop=MARKET&dolsection=MARKET24', section: 'MARKET24' },
+  { name: '미니벨로 완성차장터', url: 'https://bikesell.co.kr/site/board/list.asp?doltop=MARKET&dolsection=MARKET31', section: 'MARKET31' },
+  { name: '미니벨로 부품장터', url: 'https://bikesell.co.kr/site/board/list.asp?doltop=MARKET&dolsection=MARKET34', section: 'MARKET34' }
 ];
 
-// 기존 탐색 기록 로드 (Set으로 중복 관리)
 function loadSeenPosts() {
   if (fs.existsSync(SEEN_FILE)) {
     try {
@@ -40,13 +40,11 @@ function loadSeenPosts() {
   return new Set();
 }
 
-// 탐색 기록 저장
 function saveSeenPosts(seenSet) {
   const data = Array.from(seenSet);
   fs.writeFileSync(SEEN_FILE, JSON.stringify(data, null, 2), 'utf8');
 }
 
-// 필터 설정 로드
 function loadFilterConfig() {
   if (fs.existsSync(FILTER_FILE)) {
     try {
@@ -64,7 +62,6 @@ function loadFilterConfig() {
   return { KEYWORDS: [], WRITERS: [] };
 }
 
-// 텔레그램 알림 전송
 function sendTelegramMessage(text) {
   if (!TELEGRAM_TOKEN || !TELEGRAM_CHAT_ID) {
     console.log('[TELEGRAM SKIPPED] 토큰 또는 Chat ID 미설정');
@@ -96,7 +93,7 @@ function sendTelegramMessage(text) {
 
 async function run() {
   console.log('====================================================');
-  console.log('[START] 바이크셀 8개 통합 장터 구동 엔진');
+  console.log('[START] 바이크셀 8개 통합 장터 구동 엔진 (텍스트 파서)');
   console.log('====================================================');
 
   const seenPosts = loadSeenPosts();
@@ -116,42 +113,50 @@ async function run() {
     try {
       await page.goto(board.url, { waitUntil: 'domcontentloaded', timeout: 30000 });
 
-      const posts = await page.evaluate(() => {
-        const rows = Array.from(document.querySelectorAll('table tr, ul li, .board_list tr'));
-        const results = [];
-
-        rows.forEach(row => {
-          const linkEl = row.querySelector('a[href*="code="], a[href*="board="]');
-          if (!linkEl) return;
-
-          const href = linkEl.getAttribute('href') || '';
-          const match = href.match(/code=(\d+)/);
-          if (!match) return;
-
-          const id = match[1];
-          const title = linkEl.innerText.trim();
-
-          const writerEl = row.querySelector('.writer, .author, td:nth-child(3)');
-          const writer = writerEl ? writerEl.innerText.trim() : '';
-
-          if (id && title) {
-            results.push({ id, title, writer, href });
+      // 1. 페이지 전체 텍스트 및 dolseq 링크 매핑 데이터 수집
+      const pageData = await page.evaluate(() => {
+        const fullText = document.body.innerText;
+        
+        // 링크 태그에서 dolseq 추출하여 매핑 테이블 작성
+        const linkMap = {};
+        const links = Array.from(document.querySelectorAll('a[href*="content.asp"]'));
+        links.forEach(a => {
+          const href = a.getAttribute('href') || '';
+          const match = href.match(/dolseq=(\d+)/i);
+          const title = a.innerText.trim();
+          if (match && title) {
+            linkMap[title] = match[1];
           }
         });
 
-        return results;
+        return { fullText, linkMap };
       });
+
+      // 2. 제시해주신 텍스트 패턴 정규식 파싱
+      // ▒제목[댓글수]\n조회수작성자\n날짜 형태 추출
+      const regex = /▒([^\n\[]+)\[\s*\d+\s*\]\s*\n\s*\d+([a-zA-Z0-9_-]+)\s*\n\s*(\d{4}-\d{2}-\d{2})/g;
+      const posts = [];
+      let match;
+
+      while ((match = regex.exec(pageData.fullText)) !== null) {
+        const title = match[1].trim();
+        const writer = match[2].trim();
+        const date = match[3].trim();
+        
+        // 매핑된 링크에서 게시글 ID(dolseq) 식별, 없으면 제목 고유값으로 대체
+        const id = pageData.linkMap[title] || `${board.section}_${title}`;
+
+        posts.push({ id, title, writer, date });
+      }
 
       console.log(`└ [파싱 완료] ${board.name} -> 총 ${posts.length}개 매물 정제 완료`);
 
+      // 3. 필터링 및 전송 데이터 가공
       posts.forEach(post => {
-        // 이미 확인한 게시물이면 스킵
         if (seenPosts.has(post.id)) return;
 
-        // 새 매물이면 탐색 기록에 추가
         seenPosts.add(post.id);
 
-        // 키워드 및 작성자 필터링
         const matchedKeyword = filterConfig.KEYWORDS.find(kw =>
           post.title.toLowerCase().includes(kw.toLowerCase())
         );
@@ -165,13 +170,18 @@ async function run() {
             matchedWriter ? `작성자 [${matchedWriter}]` : ''
           ].filter(Boolean).join(' / ');
 
+          // 모바일 접속 가능 링크 구성
+          const postUrl = post.id.includes('_')
+            ? board.url 
+            : `https://bikesell.co.kr/SITE/M/content.asp?doltop=MARKET&dolsection=${board.section}&dolseq=${post.id}`;
+
           matchedPosts.push({
             boardName: board.name,
             id: post.id,
             title: post.title,
             writer: post.writer,
             reason: matchReason,
-            url: `http://www.bikesell.co.kr/m/m_board_view.asp?code=${post.id}`
+            url: postUrl
           });
         }
       });
@@ -183,7 +193,6 @@ async function run() {
 
   await browser.close();
 
-  // 탐색된 전체 기록 파일 저장
   saveSeenPosts(seenPosts);
 
   if (matchedPosts.length > 0) {
