@@ -1,4 +1,4 @@
-name: Sell Monitor Test
+name: BikeSell Filter Monitor (5min)
 
 on:
   workflow_dispatch:
@@ -10,7 +10,7 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: filter-monitor-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -43,11 +43,12 @@ jobs:
         if: steps.cache-playwright.outputs.cache-hit != 'true'
         run: npx playwright install --with-deps chromium
 
-      - name: Run monitor script
+      - name: Run Filter Monitor
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           SEEN_FILE_NAME: 'seen_posts.json'
+          RUN_MODE: 'FILTER' # 명시적 필터 모드 지정
         run: node scripts/monitor.js
 
       - name: Commit & Push updated seen_posts.json
