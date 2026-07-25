@@ -9,9 +9,14 @@ permissions:
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   monitor_all:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
 
     steps:
       - name: Checkout
@@ -27,9 +32,19 @@ jobs:
         with:
           node-version: 24
 
+      - name: Cache Playwright Browsers
+        id: cache-playwright
+        uses: actions/cache@v4.2.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-${{ hashFiles('package-lock.json') }}
+
       - name: Install dependencies
         run: npm install
-      
+
+      - name: Install Playwright Browsers & System Deps
+        if: steps.cache-playwright.outputs.cache-hit != 'true'
+        run: npx playwright install --with-deps chromium
 
       - name: Run monitor script
         env:
@@ -42,7 +57,7 @@ jobs:
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          git add .
+          git add seen_posts_all.json
           git commit -m "chore: update seen_posts_all.json [skip ci]" || exit 0
           git pull --rebase origin main
           git push
