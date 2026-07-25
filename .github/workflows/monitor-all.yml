@@ -1,4 +1,4 @@
-name: Sell Monitor All (No Filter)
+name: BikeSell All Monitor (1hour)
 
 on:
   workflow_dispatch:
@@ -10,7 +10,7 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: all-monitor-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -23,9 +23,6 @@ jobs:
         uses: actions/checkout@v4.2.2
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Remove filter config for full monitoring
-        run: rm -f filter_config.json
 
       - name: Use Node.js
         uses: actions/setup-node@v4.2.0
@@ -46,11 +43,12 @@ jobs:
         if: steps.cache-playwright.outputs.cache-hit != 'true'
         run: npx playwright install --with-deps chromium
 
-      - name: Run monitor script
+      - name: Run Full Monitor
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           SEEN_FILE_NAME: 'seen_posts_all.json'
+          RUN_MODE: 'ALL' # 명시적 무필터 전체 모드 지정
         run: node scripts/monitor.js
 
       - name: Commit & Push updated seen_posts_all.json
